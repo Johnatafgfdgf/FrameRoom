@@ -47,6 +47,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        if (SpaceProfile.isOwned(this)) {
+            openParallelSpace(null);
+            finish();
+            return;
+        }
         if (state != null) page = state.getInt("tab", 0);
         root = Ui.screen(this);
         root.setFocusableInTouchMode(true);
@@ -121,7 +126,9 @@ public final class MainActivity extends Activity {
         hero.addView(Ui.text(this, dll ? "Lossless.dll importada" : "Importe a Lossless.dll para usar o FG.",
                 14, dll ? Ui.ACCENT : Ui.MUTED, false));
         Ui.space(hero, 14);
-        hero.addView(Ui.button(this, "+  Adicionar aplicativo", true,
+        hero.addView(Ui.button(this, "Espaço paralelo", true, () -> openParallelSpace(null)));
+        Ui.space(hero, 8);
+        hero.addView(Ui.button(this, "+  Adicionar aplicativo", false,
             () -> startActivity(new Intent(this, AppPickerActivity.class))));
         body.addView(hero);
         Ui.space(body, 18);
@@ -166,13 +173,14 @@ public final class MainActivity extends Activity {
             Ui.pad(title, 11, 0, 2, 0);
             title.addView(Ui.text(this, name, 17, Ui.TEXT, true));
             String state = supported ? (snapshot == null ? "Compatível · prepara ao jogar" : "Compatível · cópia pronta")
-                : snapshot == null ? "Execução hospedada indisponível" : "APKs salvos · execução indisponível";
+                : "Espaço paralelo disponível para apps compatíveis";
             title.addView(Ui.text(this, state, 13, supported ? Ui.ACCENT : Ui.MUTED, false));
             line.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
             card.addView(line);
             Ui.space(card, 8);
             LinearLayout actions = Ui.row(this);
             if (supported) Ui.tabWeight(actions, Ui.button(this, "Jogar", true, () -> play(pkg)), 7);
+            else Ui.tabWeight(actions, Ui.button(this, "Clonar", true, () -> openParallelSpace(pkg)), 7);
             Ui.tabWeight(actions, Ui.button(this, supported ? "Configurar" : "Detalhes", false,
                     () -> gameDetails(pkg)), 0);
             card.addView(actions);
@@ -237,6 +245,12 @@ public final class MainActivity extends Activity {
         startActivity(intent);
     }
 
+    private void openParallelSpace(String pkg) {
+        Intent space = new Intent(this, ParallelSpaceActivity.class);
+        if (pkg != null) space.putExtra(SpaceProfile.PACKAGE, pkg);
+        startActivity(space);
+    }
+
     private void gameDetails(String pkg) {
         Dialog sheet = new Dialog(this);
         sheet.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -285,6 +299,10 @@ public final class MainActivity extends Activity {
                     runBusy(() -> GameStorage.clear(this, pkg) ? "Dados hospedados apagados." : "Falha ao limpar alguns dados.");
                 }));
         } else {
+            addButton(content, "Clonar no espaço paralelo", true, () -> {
+                sheet.dismiss();
+                openParallelSpace(pkg);
+            });
             append(content, GamePackageSnapshot.installedReport(this, pkg));
             addButton(content, "Abrir no Android · sem FG", false, () -> {
                 Intent intent = getPackageManager().getLaunchIntentForPackage(pkg);

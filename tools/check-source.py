@@ -9,6 +9,8 @@ fg = (r/'app/src/main/cpp/framegen_vulkan.cpp').read_text()
 cmake = (r/'app/src/main/cpp/CMakeLists.txt').read_text()
 gradle = (r/'app/build.gradle.kts').read_text()
 workflow = (r/'.github/workflows/android-debug.yml').read_text()
+space = (r/'app/src/main/java/dev/frameroom/SpaceInstallActivity.java').read_text()
+profile = (r/'app/src/main/java/dev/frameroom/SpaceProfile.java').read_text()
 checks = {
   'Player JNI surface/session binding': 'nativeStart(Surface surface, int fps, boolean ahb, boolean live,' in java and
       'VulkanPlayerView_nativeStart' in cpp and 'VulkanPlayerView_nativeStop' in cpp,
@@ -19,8 +21,8 @@ checks = {
   'Query image format support': 'vkGetPhysicalDeviceImageFormatProperties2' in ahb,
   'Record GPU render/copy commands': all(key in ahb for key in ('vkCmdClearColorImage', 'vkCmdCopyBufferToImage', 'vkCmdCopyImage', 'vkCmdPipelineBarrier')),
   'Acquire synchronization waits for transfer': 'VK_PIPELINE_STAGE_TRANSFER_BIT :' in cpp,
-  'New APK version': 'versionName = "0.11.0"' in gradle,
-  'CI uploads apk and failure logs': 'FrameRoom-r0.11-debug-apk' in workflow and 'FrameRoom-r0.11-build-log' in workflow,
+  'New APK version': 'versionName = "0.12.0"' in gradle,
+  'CI uploads apk and failure logs': 'FrameRoom-r0.12-debug-apk' in workflow and 'FrameRoom-r0.12-build-log' in workflow,
   'AHB ring owns two source frames': 'std::array<AhbOffscreen, 2>' in cpp and 'current.record(' in cpp,
   'Export source buffer accessor': 'hardwareBuffer() const' in (r/'app/src/main/cpp/ahb_offscreen.h').read_text(),
   'Only public Android NDK link libraries': 'nativewindow' not in cmake and 'vulkan android log' in cmake,
@@ -67,6 +69,9 @@ checks = {
   'No AHB image requirements fetched prior to binding': all('vkGetImageMemoryRequirements(' not in source for source in
       (ahb, fg, (r/'app/src/main/cpp/framegen_batch.cpp').read_text())),
   'No MediaProjection API': 'android.media.projection' not in java and 'createScreenCaptureIntent(' not in java and 'AMediaProjection' not in cpp,
+  'Parallel installation is delegated to the Android installer inside an owned profile':
+      'ACTION_INSTALL_PACKAGE' in space and 'Uri.fromParts("package", pkg, null)' in space and
+      'SpaceProfile.isOwned(this)' in space and 'isManagedProfile()' in profile and 'isProfileOwnerApp(' in profile,
 }
 for name, ok in checks.items():
     print(('PASS' if ok else 'FAIL') + ': ' + name)

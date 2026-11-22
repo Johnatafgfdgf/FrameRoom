@@ -1,15 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.software.managed_users" android:required="false" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <permission android:name="${applicationId}.permission.SPACE_BRIDGE" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.permission.SPACE_BRIDGE" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="${applicationId}.space.OPEN" />
+        </intent>
+        <intent>
+            <action android:name="${applicationId}.space.INSTALL" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.INSTALL_PACKAGE" />
+            <data android:scheme="package" />
         </intent>
     </queries>
     <application android:allowBackup="false" android:label="@string/frameroom_label" android:theme="@style/FrameRoomTheme" android:icon="@drawable/ic_frameroom" android:usesCleartextTraffic="false">
         <activity android:name=".HostedGameActivity" android:exported="false" android:process=":virtualgame" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity android:name=".VulkanDemoActivity" android:exported="false" android:process=":virtualgfx" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity android:name=".AppPickerActivity" android:exported="false" />
+        <activity android:name=".ParallelSpaceActivity" android:exported="false" />
+        <activity android:name=".SpaceInstallActivity" android:exported="false" />
+        <activity android:name=".SpaceBridgeActivity" android:enabled="false" android:exported="true"
+            android:permission="${applicationId}.permission.SPACE_BRIDGE" android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="${applicationId}.space.OPEN" />
+                <action android:name="${applicationId}.space.INSTALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".SpaceProvisioningActivity" android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN" android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".SpaceAdminReceiver" android:exported="true"
+            android:label="@string/frameroom_label" android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/parallel_space_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+            </intent-filter>
+        </receiver>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

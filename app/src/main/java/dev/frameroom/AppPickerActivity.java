@@ -14,6 +14,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -21,14 +22,18 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class AppPickerActivity extends Activity {
+    static final String EXTRA_CLONE_PICK = "chooseAppForParallelSpace";
+
     private record InstalledApp(String pkg, String label, ResolveInfo launcher) {}
     private final List<InstalledApp> apps = new ArrayList<>();
     private LinearLayout list;
     private PackageManager packages;
+    private boolean cloning;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         packages = getPackageManager();
+        cloning = getIntent().getBooleanExtra(EXTRA_CLONE_PICK, false);
         LinearLayout root = Ui.screen(this);
         LinearLayout body = Ui.column(this);
         Ui.pad(body, 18, 12, 18, 10);
@@ -36,7 +41,7 @@ public final class AppPickerActivity extends Activity {
         Button back = Ui.button(this, "‹", false, this::finish);
         back.setContentDescription("Voltar");
         heading.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 48), -2));
-        TextView title = Ui.text(this, "Adicionar aplicativo", 23, Ui.TEXT, true);
+        TextView title = Ui.text(this, cloning ? "Clonar aplicativo" : "Adicionar aplicativo", 23, Ui.TEXT, true);
         Ui.pad(title, 11, 0, 0, 0);
         heading.addView(title);
         body.addView(heading);
@@ -71,7 +76,7 @@ public final class AppPickerActivity extends Activity {
     private void showApps(String query) {
         list.removeAllViews();
         String term = query.trim().toLowerCase(Locale.ROOT);
-        Set<String> added = AppLibrary.all(this);
+        Set<String> added = cloning ? Collections.emptySet() : AppLibrary.all(this);
         for (InstalledApp app : apps) {
             if (!app.label.toLowerCase(Locale.ROOT).contains(term) &&
                 !app.pkg.toLowerCase(Locale.ROOT).contains(term)) continue;
@@ -85,16 +90,22 @@ public final class AppPickerActivity extends Activity {
             LinearLayout caption = Ui.column(this);
             Ui.pad(caption, 10, 2, 8, 2);
             caption.addView(Ui.text(this, app.label, 15, Ui.TEXT, true));
-            if (HostedGameActivity.supportsVulkan(this, app.pkg))
+            if (!cloning && HostedGameActivity.supportsVulkan(this, app.pkg))
                 caption.addView(Ui.text(this, "Execução hospedada", 12, Ui.ACCENT, false));
             line.addView(caption, new LinearLayout.LayoutParams(0, -2, 1));
             boolean present = added.contains(app.pkg);
-            Button add = Ui.button(this, present ? "Adicionado" : "Adicionar", !present, () -> {
-                AppLibrary.add(this, app.pkg);
-                setResult(RESULT_OK);
+            String action = cloning ? "Clonar" : "Adicionar";
+            Button add = Ui.button(this, present ? "Adicionado" : action, !present, () -> {
+                if (cloning) {
+                    setResult(RESULT_OK, new Intent().putExtra(SpaceProfile.PACKAGE, app.pkg)
+                        .putExtra(SpaceProfile.APP_LABEL, app.label));
+                } else {
+                    AppLibrary.add(this, app.pkg);
+                    setResult(RESULT_OK);
+                }
                 finish();
             });
-            add.setContentDescription((present ? "Na biblioteca: " : "Adicionar ") + app.label);
+            add.setContentDescription((present ? "Na biblioteca: " : action + " ") + app.label);
             add.setEnabled(!present);
             add.setAlpha(present ? .60f : 1f);
             line.addView(add);

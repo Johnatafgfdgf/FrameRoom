@@ -1,28 +1,25 @@
-# FrameRoom R0.11
+# FrameRoom R0.12
 
-A R0.11 protege a cadência dos originais no pipeline Vulkan. A Arena já vem no APK e pode ser aberta com **Jogos → Arena FrameRoom → Jogar**. O build de teste instala ao lado da R0.10. Importe sua Lossless.dll pela aba **Motor**.
+A R0.12 usa um perfil de trabalho do Android para abrir cópias de aplicativos compatíveis com contas e armazenamento próprios. Na biblioteca, abra **Espaço paralelo → Criar espaço** e aceite a configuração do Android. Depois escolha o aplicativo, confirme a instalação se solicitado e toque em **Abrir no espaço**. O Android usa um ícone com maleta para identificar os apps do perfil.
 
-[Correções de desempenho e situação do espaço paralelo](docs/R11-PACING-GUEST.md)
+O Android compõe a tela dos apps clonados. O FG continua disponível na Arena incluída e na demonstração Vulkan. O APK R0.12 instala ao lado da R0.11. Importe sua Lossless.dll pela aba **Motor** para usar a Arena com FG.
 
-## Base da R0.10
+[Espaço paralelo e testes](docs/R12-PARALLEL-SPACE.md) · [Cadência e transporte Vulkan](docs/R11-PACING-GUEST.md)
 
-FrameRoom é um aplicativo Android ARM64 que executa jogos cooperativos e integra o LSFG da Bloodframe a um renderizador Vulkan próprio. A R0.10 inclui uma cena de teste e a Arena, cujo código de jogo vem de um APK separado. Os dois caminhos usam o mesmo renderizador.
+## Arena e demonstração Vulkan
 
-## Instalação e teste
-
-1. Instale **FrameRoom** e **Arena FrameRoom** do mesmo build disponível em [GitHub Actions](https://github.com/Johnatafgfdgf/FrameRoom/actions). Os dois APKs precisam ter a mesma assinatura. Se o instalador do Android rejeitar uma atualização por assinatura diferente, confira a origem do APK instalado. Desinstalar apaga os dados locais daquele aplicativo.
-2. No FrameRoom, abra **Motor**, importe sua **Lossless.dll** e abra a **Demonstração Vulkan**. Use **Ligar FG 2×** para executar a interpolação, ou desligue no mesmo controle para comparar.
-3. Na biblioteca, use **Adicionar aplicativo** e selecione **Arena FrameRoom**. Em **Configurar**, defina o limite original e a preferência de FG. **Jogar** prepara uma cópia local, verifica o APK e carrega a cena no processo do FrameRoom. Arraste o quadrado verde até o alvo laranja para verificar toque, áudio e progresso.
-4. **Copiar diagnóstico** inclui o caminho de transporte AHB, custos do lote, resultados da leitura de pixels e status da apresentação. A aba **Avançado** preserva os testes isolados de Vulkan, AHB e Bloodframe.
+1. Instale o APK ARM64 de **FrameRoom** do build disponível em [GitHub Actions](https://github.com/Johnatafgfdgf/FrameRoom/actions). A Arena já vem incluída.
+2. Em **Motor**, importe sua **Lossless.dll** e abra a **Demonstração Vulkan**. Use **Ligar FG 2×** para executar a interpolação ou desligue no mesmo controle para comparar.
+3. Na biblioteca, abra **Arena FrameRoom → Jogar**. Em **Configurar FPS e FG**, defina o limite original e a preferência de FG. Arraste o quadrado verde até o alvo laranja para verificar toque, áudio e progresso.
+4. **Copiar diagnóstico** inclui o transporte AHB, o custo do lote, a verificação de pixels e o status da apresentação. A aba **Avançado** inclui os testes isolados de Vulkan, AHB e Bloodframe.
 
 O teste usa 640×360 no compositor FG, com ajuste 16:9 à superfície. O overlay exibe quadros confirmados pelo driver quando `VK_GOOGLE_display_timing` responde. Em outros aparelhos, exibe envios à swapchain. A latência registrada vai da amostra da cena até o horário informado pelo driver.
 
 ## Compatibilidade
 
-- **APK cooperativo**, com contrato v1 e assinatura do FrameRoom, pode executar a cena hospedada. O host usa o UID do FrameRoom e atribui uma pasta de dados ao jogo.
-- **Aplicativos instalados sem o contrato** podem ser adicionados à biblioteca e ter o APK base e os splits copiados, quando acessíveis. A execução hospedada e o FG ficam indisponíveis para esses pacotes.
-- **Sparking! ZERO, `org.nx2a.t010035f022078000`**, ainda precisa de inspeção dos arquivos e do renderizador do port. Uma cópia de 5,9 MB não identifica OBB, pacotes de recursos externos ou o uso real de Vulkan.
-- **Adreno 710** é o alvo do próximo teste físico com a DLL do usuário. A inicialização na R0.8 foi observada. A geração e a apresentação na R0.10 exigem teste no aparelho.
+- **Aplicativos comuns compatíveis** podem ser instalados e abertos num perfil FrameRoom por meio do APK base e dos splits acessíveis. O perfil começa com armazenamento separado. Apps que dependem de OBB, downloads, serviços ou políticas específicos podem exigir configuração própria ou recusar o perfil.
+- **APK cooperativo**, com contrato v1 e assinatura do FrameRoom, pode executar a cena hospedada com acesso ao compositor LSFG. O host usa o UID do FrameRoom e atribui uma pasta de dados ao jogo.
+- **Adreno 710:** na R0.11, o vídeo do POCO X6 mostrou a demonstração com cerca de 29,5 originais/s e 42,3 apresentados/s, incluindo 13 gerados/s. Na Arena, apresentou cerca de 32–33 quadros/s com 29 originais/s. O ganho varia com a cena e a capacidade disponível.
 
 [Integração, auditoria de viabilidade e roteiro de testes](docs/R10-VULKAN-HOST.md) · [Histórico](CHANGELOG.md)
 

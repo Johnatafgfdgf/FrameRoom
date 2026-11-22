@@ -1,3 +1,9 @@
+# R0.12 — espaço paralelo Android
+
+- Cria um perfil de trabalho com a configuração oficial do Android e exibe seus aplicativos no FrameRoom.
+- Solicita ao instalador do Android que disponibilize o pacote existente no perfil, incluindo os splits. O botão **Abrir no espaço** inicia o aplicativo pelo usuário do perfil.
+- Mantém o acesso ao FG e à Arena na biblioteca pessoal. Os apps do perfil usam a composição normal do Android.
+
 # R0.11 — cadência de FG e Arena incluída
 
 - Remove a espera de um período extra após atraso e organiza a apresentação dos quadros pelo relógio da tela.

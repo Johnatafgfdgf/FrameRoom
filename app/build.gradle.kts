@@ -18,8 +18,8 @@ android {
         applicationId = "dev.frameroom"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.11.0"
+        versionCode = 12
+        versionName = "0.12.0"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
@@ -31,8 +31,8 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".r11"
-            resValue("string", "frameroom_label", "FrameRoom R0.11")
+            applicationIdSuffix = ".r12"
+            resValue("string", "frameroom_label", "FrameRoom R0.12")
         }
         getByName("release") {
             resValue("string", "frameroom_label", "FrameRoom")
