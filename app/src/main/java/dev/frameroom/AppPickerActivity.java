@@ -4,88 +4,104 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
+import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.HashSet;
-import java.util.Set;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
-public class AppPickerActivity extends Activity {
+public final class AppPickerActivity extends Activity {
+    private record InstalledApp(String pkg, String label, ResolveInfo launcher) {}
+    private final List<InstalledApp> apps = new ArrayList<>();
     private LinearLayout list;
-    private final List<ResolveInfo> apps = new ArrayList<>();
-    private PackageManager pm;
-    @Override public void onCreate(Bundle state) {
+    private PackageManager packages;
+
+    @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        pm = getPackageManager();
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(20, 30, 20, 18);
-        root.setBackgroundColor(Color.rgb(12, 16, 27));
-        TextView title = new TextView(this);
-        title.setText("Adicionar aplicativo");
-        title.setTextSize(24);
-        title.setTextColor(Color.WHITE);
-        root.addView(title);
-        TextView notice = new TextView(this);
-        notice.setText("Adiciona o jogo à lista. Você poderá preparar uma cópia privada dos APKs, mas não jogá-la em espaço paralelo nesta versão.");
-        notice.setTextColor(Color.LTGRAY);
-        notice.setPadding(0, 10, 0, 14);
-        root.addView(notice);
-        EditText search = new EditText(this);
-        search.setSingleLine(true);
-        search.setHint("Pesquisar aplicativos");
-        search.setTextColor(Color.WHITE);
-        search.setHintTextColor(Color.GRAY);
-        root.addView(search);
-        ScrollView scroll = new ScrollView(this);
-        list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(list);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        packages = getPackageManager();
+        LinearLayout root = Ui.screen(this);
+        LinearLayout body = Ui.column(this);
+        Ui.pad(body, 18, 12, 18, 10);
+        LinearLayout heading = Ui.row(this);
+        Button back = Ui.button(this, "‹", false, this::finish);
+        back.setContentDescription("Voltar");
+        heading.addView(back, new LinearLayout.LayoutParams(Ui.dp(this, 48), -2));
+        TextView title = Ui.text(this, "Adicionar aplicativo", 23, Ui.TEXT, true);
+        Ui.pad(title, 11, 0, 0, 0);
+        heading.addView(title);
+        body.addView(heading);
+        Ui.space(body, 12);
+        EditText search = Ui.search(this, "Pesquisar apps instalados");
+        body.addView(search);
+        Ui.space(body, 10);
+        list = Ui.column(this);
+        body.addView(Ui.scrolling(this, list), new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(body, new LinearLayout.LayoutParams(-1, -1));
+        root.setFocusableInTouchMode(true);
         setContentView(root);
-        Intent filter = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        root.requestFocus();
+
         Set<String> seen = new HashSet<>();
-        for (ResolveInfo item : pm.queryIntentActivities(filter, 0)) {
-            if (item.activityInfo != null && !getPackageName().equals(item.activityInfo.packageName)
-                    && seen.add(item.activityInfo.packageName)) apps.add(item);
+        Intent filter = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        for (ResolveInfo item : packages.queryIntentActivities(filter, 0)) {
+            if (item.activityInfo == null) continue;
+            String pkg = item.activityInfo.packageName;
+            if (!getPackageName().equals(pkg) && seen.add(pkg))
+                apps.add(new InstalledApp(pkg, item.loadLabel(packages).toString(), item));
         }
-        apps.sort(Comparator.comparing(a -> a.loadLabel(pm).toString().toLowerCase(Locale.ROOT)));
-        render("");
+        apps.sort(Comparator.comparing(item -> item.label.toLowerCase(Locale.ROOT)));
         search.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { render(s.toString()); }
-            @Override public void afterTextChanged(Editable e) {}
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) { showApps(value.toString()); }
+            @Override public void afterTextChanged(Editable value) {}
         });
+        showApps("");
     }
-    private void render(String query) {
+
+    private void showApps(String query) {
         list.removeAllViews();
-        String filter = query.toLowerCase(Locale.ROOT).trim();
-        Set<String> alreadyAdded = AppLibrary.all(this);
-        for (ResolveInfo r : apps) {
-            String label = r.loadLabel(pm).toString();
-            String pkg = r.activityInfo.packageName;
-            if (!label.toLowerCase(Locale.ROOT).contains(filter) && !pkg.toLowerCase(Locale.ROOT).contains(filter)) continue;
-            Button button = new Button(this);
-            button.setAllCaps(false);
-            button.setText(label + "\n" + pkg + (alreadyAdded.contains(pkg) ? "\n(na biblioteca)" : ""));
-            button.setCompoundDrawablesWithIntrinsicBounds(r.loadIcon(pm), null, null, null);
-            button.setCompoundDrawablePadding(18);
-            button.setOnClickListener(v -> {
-                AppLibrary.add(this, pkg);
+        String term = query.trim().toLowerCase(Locale.ROOT);
+        Set<String> added = AppLibrary.all(this);
+        for (InstalledApp app : apps) {
+            if (!app.label.toLowerCase(Locale.ROOT).contains(term) &&
+                !app.pkg.toLowerCase(Locale.ROOT).contains(term)) continue;
+            LinearLayout line = Ui.row(this);
+            line.setBackground(Ui.shape(this, Ui.PANEL, 13, Ui.OUTLINE));
+            Ui.pad(line, 10, 8, 10, 8);
+            ImageView icon = new ImageView(this);
+            icon.setImageDrawable(app.launcher.loadIcon(packages));
+            icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            line.addView(icon, new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40)));
+            LinearLayout caption = Ui.column(this);
+            Ui.pad(caption, 10, 2, 8, 2);
+            caption.addView(Ui.text(this, app.label, 15, Ui.TEXT, true));
+            if (HostedGameActivity.supportsVulkan(this, app.pkg))
+                caption.addView(Ui.text(this, "Execução hospedada", 12, Ui.ACCENT, false));
+            line.addView(caption, new LinearLayout.LayoutParams(0, -2, 1));
+            boolean present = added.contains(app.pkg);
+            Button add = Ui.button(this, present ? "Adicionado" : "Adicionar", !present, () -> {
+                AppLibrary.add(this, app.pkg);
                 setResult(RESULT_OK);
                 finish();
             });
-            list.addView(button);
+            add.setContentDescription((present ? "Na biblioteca: " : "Adicionar ") + app.label);
+            add.setEnabled(!present);
+            add.setAlpha(present ? .60f : 1f);
+            line.addView(add);
+            list.addView(line);
+            Ui.space(list, 8);
         }
+        if (list.getChildCount() == 0)
+            list.addView(Ui.text(this, "Nenhum aplicativo encontrado.", 14, Ui.MUTED, false));
     }
 }

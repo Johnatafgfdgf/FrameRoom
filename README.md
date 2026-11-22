@@ -1,22 +1,23 @@
-# FrameRoom R0.9 — correção do AHardwareBuffer na Adreno 710
+# FrameRoom R0.10
 
-**Correção baseada em evidência do aparelho:** R0.8 conseguiu inicializar Bloodframe 2.0 com uma Lossless.dll na GPU Adreno (TM) 710. Shaders selecionados: FP32 SPIR-V; `ahb_transport=direct-storage`, `input_copy=0`, `output_copy=0`, `sync_fd=1`, AHB input flags=768 e output flags=16777984. Ao tentar gerar 1 quadro, `AHardwareBuffer_allocate` retornou 1. A demonstração Vulkan direta e AHB com permissões regulares funcionou em vídeo enviado pelo usuário.
+FrameRoom é um aplicativo Android ARM64 que executa jogos cooperativos e integra o LSFG da Bloodframe a um renderizador Vulkan próprio. A R0.10 inclui uma cena de teste e a Arena, cujo código de jogo vem de um APK separado. Os dois caminhos usam o mesmo renderizador.
 
-## O que mudou
-- `tools/patch_bloodframe_ahb.py`: antes de construir Bloodframe no CI, testa a alocação REAL do AHardwareBuffer RGBA8 usando `GPU_DATA_BUFFER`, além do Vulkan format probe. Se o Android gralloc rejeitar essa combinação, desabilita apenas o transporte de saída direct-storage e faz a seleção padrão do upstream escolher `direct-input-copy-output` ou `transport-only` conforme capacidades verificadas. Não força formatos incompatíveis, nem remove flags que o backend exige.
-- `framegen_batch.cpp`: agora reporta qual buffer falhou (entrada 0/1 ou saída FG), flags exatas, `AHardwareBuffer_isSupported` e código de alocação; o resultado de sucesso discrimina `input_copy` e `output_copy`.
-- Mantém a DLL importada pelo usuário, Bytecode cooperativo de teste e snapshots APK da R0.8. Nenhuma DLL proprietária é distribuída.
+## Instalação e teste
 
-## O que testar no POCO X6
-1. Baixe o FrameRoom r0.9 debug do GitHub Actions desta branch após build verde.
-2. A DLL já importada pode continuar válida se atualizar sobre o APK com a mesma assinatura.
-3. Toque **Diagnosticar Bloodframe + DLL + Vulkan**. O transporte esperado SE o problema for mesmo o modo direct-storage é `direct-input-copy-output`, com `output_copy=1` e usage de saída sem `GPU_DATA_BUFFER`.
-4. Toque **Teste experimental: gerar 1 quadro LSFG (sem exibição)**. O resultado será uma chamada real de `create_context/present/wait`, mas o quadro produzido ainda não é mostrado.
-5. Se falhar, anote a mensagem completa; os diagnósticos agora mostram o buffer, uso e etapa exatos.
+1. Instale **FrameRoom** e **Arena FrameRoom** do mesmo build disponível em [GitHub Actions](https://github.com/Johnatafgfdgf/FrameRoom/actions). Os dois APKs precisam ter a mesma assinatura. Se o instalador do Android rejeitar uma atualização por assinatura diferente, confira a origem do APK instalado. Desinstalar apaga os dados locais daquele aplicativo.
+2. No FrameRoom, abra **Motor**, importe sua **Lossless.dll** e abra a **Demonstração Vulkan**. Use **Ligar FG 2×** para executar a interpolação, ou desligue no mesmo controle para comparar.
+3. Na biblioteca, use **Adicionar aplicativo** e selecione **Arena FrameRoom**. Em **Configurar**, defina o limite original e a preferência de FG. **Jogar** prepara uma cópia local, verifica o APK e carrega a cena no processo do FrameRoom. Arraste o quadrado verde até o alvo laranja para verificar toque, áudio e progresso.
+4. **Copiar diagnóstico** inclui o caminho de transporte AHB, custos do lote, resultados da leitura de pixels e status da apresentação. A aba **Avançado** preserva os testes isolados de Vulkan, AHB e Bloodframe.
 
-## Limitações
-- **Não executa jogos Android comerciais em sandbox e não aplica LSFG ao Sparking ZERO.** Os APKs preparados continuam arquivos inertes. O processo do jogo de teste R0.8 é um carregador cooperativo e não virtualiza apps arbitrários.
-- Mesmo sucesso do processamento sintético não prova correção visual dos quadros, FPS ou latência do jogo.
-- A seleção alternativa é um fallback seguro; pode consumir mais largura de banda da GPU e precisa de teste real.
+O teste usa 640×360 no compositor FG, com ajuste 16:9 à superfície. O overlay exibe quadros confirmados pelo driver quando `VK_GOOGLE_display_timing` responde; em outros aparelhos, exibe envios à swapchain. A latência registrada vai da amostra da cena até o horário informado pelo driver.
 
-Créditos à Bloodframe (MIT), commit upstream fixado `f4ac713aef58d9403a136e179b3b0d163d85eb66`. A modificação é aplicada apenas na compilação, documentada e testada contra as âncoras da versão fixada.
+## Compatibilidade
+
+- **APK cooperativo**, com contrato v1 e assinatura do FrameRoom, pode executar a cena hospedada. O host usa o UID do FrameRoom e atribui uma pasta de dados ao jogo.
+- **Aplicativos instalados sem o contrato** podem ser adicionados à biblioteca e ter o APK base e os splits copiados, quando acessíveis. A execução hospedada e o FG ficam indisponíveis para esses pacotes.
+- **Sparking! ZERO, `org.nx2a.t010035f022078000`**, ainda precisa de inspeção dos arquivos e do renderizador do port. Uma cópia de 5,9 MB não identifica OBB, pacotes de recursos externos ou o uso real de Vulkan.
+- **Adreno 710** é o alvo do próximo teste físico com a DLL do usuário. A inicialização na R0.8 foi observada. A geração e a apresentação na R0.10 exigem teste no aparelho.
+
+[Integração, auditoria de viabilidade e roteiro de testes](docs/R10-VULKAN-HOST.md) · [Histórico](CHANGELOG.md)
+
+Bloodframe MIT, fixada em [`f4ac713a`](https://github.com/ducvd89/bloodframe/tree/f4ac713aef58d9403a136e179b3b0d163d85eb66). Importe a sua DLL no aparelho.

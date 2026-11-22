@@ -1,3 +1,11 @@
+# R0.10 — apresentação Vulkan e biblioteca mobile
+
+- Envia o resultado da Bloodframe à swapchain, com dois originais distintos, validação inicial de pixels, pacing e fallback Vulkan direto.
+- Corrige a importação AHB e verifica o suporte de gralloc e de sync FD no backend pinado.
+- O APK Arena controla toque, áudio e progresso por um contrato cooperativo. O FrameRoom executa sua lógica autenticada e renderiza a cena.
+- Biblioteca de jogos, pesquisa, opções por jogo, central Lossless.dll e diagnósticos avançados. Overlay distingue envios e exibição observada.
+- CI compila os dois APKs e verifica assinatura, ABI e ausência de DLL empacotada. A validação de hardware permanece registrada no roteiro de teste.
+
 # R0.9 — fallback AHardwareBuffer na Adreno 710
 
 - Investigação do erro de hardware `AHardwareBuffer_allocate 1` com LSFG inicializado e `ahb_transport=direct-storage`.

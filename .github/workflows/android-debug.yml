@@ -68,19 +68,24 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon :app:assembleDebug :samplegame:assembleDebug --stacktrace 2>&1 | tee build.log
+          gradle --no-daemon :app:assembleDebug :samplegame:assembleDebug --stacktrace 2>&1 | tee -a build.log
+      - name: Verificar assinatura, ABI e conteúdo dos dois APKs
+        shell: bash
+        run: |
+          set -o pipefail
+          bash tools/verify-apks.sh 2>&1 | tee -a build.log
       - name: Enviar build.log mesmo se falhar
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.9-build-log
+          name: FrameRoom-r0.10-build-log
           path: build.log
           if-no-files-found: ignore
       - name: Enviar APK debug
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.9-debug-apk
+          name: FrameRoom-r0.10-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -88,6 +93,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.9-cooperative-demo-apk
+          name: FrameRoom-r0.10-cooperative-demo-apk
           path: samplegame/build/outputs/apk/debug/samplegame-debug.apk
           if-no-files-found: error
