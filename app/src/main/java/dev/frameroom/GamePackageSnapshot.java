@@ -30,7 +30,25 @@ final class GamePackageSnapshot {
             return files+" arquivos APK, "+String.format(Locale.ROOT,"%.1f MB",bytes/1048576.0)
                 +"\nVersão "+version+" • Motor provável: "+engine
                 +"\nARM64 dentro do APK: "+(arm64?"sim":"não identificado")
-                +"\nNÃO é um clone executável: falta o runtime virtualizado e a ligação Vulkan.";
+                +"\nInclui apenas os arquivos APK instalados.";
+        }
+    }
+
+    static String installedReport(Context context, String packageName) {
+        PackageManager pm = context.getPackageManager();
+        try {
+            ApplicationInfo app = pm.getApplicationInfo(packageName, 0);
+            PackageInfo pkg = pm.getPackageInfo(packageName, 0);
+            int splits = app.splitSourceDirs == null ? 0 : app.splitSourceDirs.length;
+            long bytes = app.sourceDir == null ? 0 : new File(app.sourceDir).length();
+            if (app.splitSourceDirs != null)
+                for (String path : app.splitSourceDirs) if (path != null) bytes += new File(path).length();
+            return "Versão instalada: " + (pkg.versionName == null ? "desconhecida" : pkg.versionName) +
+                "\nAPK base + " + splits + " splits · " + String.format(Locale.ROOT, "%.1f MiB", bytes / 1048576.0) +
+                "\nOBB, dados privados e conteúdo externo fora da cópia." +
+                "\nRenderizador e compatibilidade Vulkan ainda não confirmados.";
+        } catch (PackageManager.NameNotFoundException error) {
+            return "Aplicativo indisponível no aparelho.";
         }
     }
 
@@ -56,9 +74,8 @@ final class GamePackageSnapshot {
         if(!root.isDirectory()&&!root.mkdirs())throw new IOException("Falha ao criar pasta privada.");
         if(root.getUsableSpace()<totalSize+(128L<<20))
             throw new IOException("Espaço insuficiente: são necessários os APKs mais 128 MB livres.");
-        String id=packageName+"__"+System.currentTimeMillis();
-        File target=new File(root,id);
-        if(!target.mkdir())throw new IOException("Falha ao criar pasta do snapshot.");
+        File target=java.nio.file.Files.createTempDirectory(root.toPath(),packageName+"__").toFile();
+        String id=target.getName();
         long bytes=0;
         boolean unity=false,unreal=false,arm64=false;
         JSONArray all=new JSONArray();
@@ -105,10 +122,10 @@ final class GamePackageSnapshot {
             metadata.put("engine",engine);metadata.put("arm64",arm64);
             metadata.put("bytes",bytes);metadata.put("files",all);
             metadata.put("warning","Não inclui dados privados, OBB ou Play Asset Delivery. Não é executável.");
-            try(OutputStreamWriter writer=new OutputStreamWriter(
-                new FileOutputStream(new File(target,"snapshot.json")),StandardCharsets.UTF_8)){
-                writer.write(metadata.toString(2));
-            }
+            File temporary=new File(target,"snapshot.tmp");
+            java.nio.file.Files.write(temporary.toPath(),metadata.toString(2).getBytes(StandardCharsets.UTF_8));
+            java.nio.file.Files.move(temporary.toPath(), new File(target,"snapshot.json").toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             return new Snapshot(packageName,id,engine,version,bytes,sources.size(),arm64);
         }catch(Exception error){deleteTree(target);throw error;}
     }
@@ -141,13 +158,12 @@ final class GamePackageSnapshot {
 
 
     /**
-     * Read-only DEX path for a cooperative APK with EXACT package identity and
-     * matching signatures. We also verify that the staged APKs still match
+     * Read-only DEX path for a co-signed APK that declared a supported entrypoint. We also verify that the staged APKs still match
      * both the snapshot manifest and the currently installed signed APK.
      */
     static String verifiedDexPath(Context context,String packageName) throws Exception {
-        if(!"dev.frameroom.samplegame".equals(packageName))
-            throw new SecurityException("APK externo não compatível com runtime cooperativo.");
+        if (!HostedGameActivity.acceptsPackage(context, packageName))
+            throw new SecurityException("APK externo sem contrato cooperativo ou assinatura compatível.");
         PackageManager pm=context.getPackageManager();
         if(pm.checkSignatures(context.getPackageName(),packageName)!=PackageManager.SIGNATURE_MATCH)
             throw new SecurityException("APK de teste com assinatura diferente do FrameRoom.");

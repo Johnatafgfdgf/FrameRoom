@@ -79,7 +79,22 @@ def patch_device(source: str) -> str:
 def patch_context(source: str) -> str:
     # -1 means the host already waited. Importing it as a semaphore would
     # still require VK_KHR_external_semaphore_fd on the host-wait-only path.
-    return replace_once(source, SIGNALED, "    const bool hasInputSemaphore = inSem >= 0;")
+    source = replace_once(source, SIGNALED, "    const bool hasInputSemaphore = inSem >= 0;")
+    export = "    const size_t completedWindow ="
+    source = replace_once(source, export, """    exportAndroidSyncFdOutputs =
+        exportAndroidSyncFdOutputs && vk.device.getDiagnostics().externalSemaphoreSyncFd;
+""" + export)
+    start = source.index("bool Context::waitForCompletion(Vulkan& vk) {")
+    block = source.index("\n", start) + 1
+    end = source.index("    return true;", block)
+    # Device loss stops all pending work. Teardown can reclaim the context.
+    body = source[block:end]
+    wrapped = "    try {\n" + "".join("    " + line for line in body.splitlines(keepends=True))
+    wrapped += """    } catch (const LSFG::vulkan_error& error) {
+        if (error.error() != VK_ERROR_DEVICE_LOST) throw;
+    }
+"""
+    return source[:block] + wrapped + source[end:]
 
 
 def self_test() -> None:
@@ -89,8 +104,13 @@ def self_test() -> None:
     assert "baseAllocation && probeAhbImageUsage" in updated
     assert "baseUsage | AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER" in updated
     assert "VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME" in updated
-    assert patch_context(SIGNALED).endswith("inSem >= 0;")
-    for patch, patched in ((patch_device, updated), (patch_context, patch_context(SIGNALED))):
+    context = "\n".join((SIGNALED, "    const size_t completedWindow = n;",
+        "bool Context::waitForCompletion(Vulkan& vk) {", "    work();", "    return true;", "}"))
+    patched_context = patch_context(context)
+    assert "const bool hasInputSemaphore = inSem >= 0;" in patched_context
+    assert "getDiagnostics().externalSemaphoreSyncFd" in patched_context
+    assert "VK_ERROR_DEVICE_LOST" in patched_context
+    for patch, patched in ((patch_device, updated), (patch_context, patched_context)):
         try:
             patch(patched)
         except ValueError:

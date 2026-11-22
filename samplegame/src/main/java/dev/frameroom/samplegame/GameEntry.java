@@ -6,17 +6,22 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.view.MotionEvent;
 import android.view.View;
+import dev.frameroom.sdk.GameScene;
 
 /**
  * A tiny independent, open-source Android APK. The exact same compiled
- * GameEntry class is run normally in SampleActivity or via FrameRoom's
- * DexClassLoader as a trusted hosted APK. Canvas demo, NOT Vulkan or LSFG.
+ * GameEntry is run normally in SampleActivity or via FrameRoom's
+ * DexClassLoader. It exposes a standalone Canvas view and a hosted Vulkan scene.
  */
 public final class GameEntry {
     private GameEntry() {}
 
     public static View createView(Context context) {
         return new PlayView(context);
+    }
+
+    public static GameScene createVulkanScene(Context context) {
+        return new HostedArcade(context);
     }
 
     private static final class PlayView extends View {

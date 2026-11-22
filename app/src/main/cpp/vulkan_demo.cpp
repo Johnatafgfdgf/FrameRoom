@@ -1,6 +1,8 @@
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #include <vulkan/vulkan.h>
 #include "ahb_offscreen.h"
+#include "framegen_vulkan.h"
+#include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <jni.h>
@@ -15,9 +17,29 @@
 #include <thread>
 #include <vector>
 #include <cmath>
+#include <condition_variable>
+#include <cstring>
+#include <deque>
+#include <iomanip>
+#include <sstream>
+#include <time.h>
 
 namespace {
 using Clock = std::chrono::steady_clock;
+using Ns = std::chrono::nanoseconds;
+
+uint64_t monotonicNs() {
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return uint64_t(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
+}
+
+struct PresentedFrame {
+    uint32_t id;
+    bool generated;
+    uint64_t sampleNs;
+    uint64_t presentedNs = 0;
+};
 
 std::string vkError(const char* stage, VkResult result) {
     return std::string(stage) + " (VkResult=" + std::to_string((int)result) + ")";
@@ -25,19 +47,24 @@ std::string vkError(const char* stage, VkResult result) {
 
 class DemoRenderer {
 public:
-    explicit DemoRenderer(ANativeWindow* nativeWindow, bool useAhb) : window(nativeWindow), ahbMode(useAhb) {}
+    DemoRenderer(ANativeWindow* nativeWindow, bool useAhb, bool live)
+        : window(nativeWindow), ahbMode(useAhb), liveMode(live) {}
     ~DemoRenderer() { cleanup(); }
 
     bool init(std::string& error) {
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.pApplicationName = "FrameRoom Native Vulkan Demo";
-        app.apiVersion = ahbMode ? VK_API_VERSION_1_1 : VK_API_VERSION_1_0;
+        app.apiVersion = (liveMode || ahbMode) ? VK_API_VERSION_1_1 : VK_API_VERSION_1_0;
         const char* instanceExtensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME};
         VkInstanceCreateInfo instanceInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         instanceInfo.pApplicationInfo = &app;
         instanceInfo.enabledExtensionCount = 2;
         instanceInfo.ppEnabledExtensionNames = instanceExtensions;
         VkResult v = vkCreateInstance(&instanceInfo, nullptr, &instance);
+        if (v == VK_ERROR_INCOMPATIBLE_DRIVER && liveMode) {
+            app.apiVersion = VK_API_VERSION_1_0;
+            v = vkCreateInstance(&instanceInfo, nullptr, &instance);
+        }
         if (v != VK_SUCCESS) { error = vkError("vkCreateInstance", v); return false; }
 
         VkAndroidSurfaceCreateInfoKHR surfaceInfo{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
@@ -64,24 +91,20 @@ public:
                     if (vkEnumerateDeviceExtensionProperties(candidate, nullptr, &n, nullptr) != VK_SUCCESS) continue;
                     std::vector<VkExtensionProperties> exts(n);
                     if (vkEnumerateDeviceExtensionProperties(candidate, nullptr, &n, exts.data()) != VK_SUCCESS) continue;
-                    bool swapchain = false;
-                    for (const auto& e : exts) if (std::string(e.extensionName) == VK_KHR_SWAPCHAIN_EXTENSION_NAME) swapchain = true;
-                    if (!swapchain) continue;
-                    if (ahbMode) {
-                        VkPhysicalDeviceProperties props{};
-                        vkGetPhysicalDeviceProperties(candidate, &props);
-                        if (VK_VERSION_MAJOR(props.apiVersion) < 1 ||
-                            (VK_VERSION_MAJOR(props.apiVersion) == 1 && VK_VERSION_MINOR(props.apiVersion) < 1))
-                            continue;
-                        bool ahbExtension = false;
-                        for (const auto& extension : exts) {
-                            if (std::string(extension.extensionName) ==
-                                VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) {
-                                ahbExtension = true; break;
-                            }
-                        }
-                        if (!ahbExtension) continue;
-                    }
+                    auto supports = [&](const char* extension) {
+                        return std::any_of(exts.begin(), exts.end(), [&](const auto& item) {
+                            return std::strcmp(item.extensionName, extension) == 0;
+                        });
+                    };
+                    if (!supports(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
+                    VkPhysicalDeviceProperties properties{};
+                    vkGetPhysicalDeviceProperties(candidate, &properties);
+                    canImport = app.apiVersion >= VK_API_VERSION_1_1 &&
+                        properties.apiVersion >= VK_API_VERSION_1_1 &&
+                        supports(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) &&
+                        supports(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
+                    if (ahbMode && !canImport) continue;
+                    displayTiming = supports(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
                     gpu = candidate;
                     queueFamily = q;
                     break;
@@ -96,18 +119,23 @@ public:
         queueInfo.queueFamilyIndex = queueFamily;
         queueInfo.queueCount = 1;
         queueInfo.pQueuePriorities = &priority;
-        const char* deviceExtensions[] = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-            VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME
-        };
+        std::vector<const char*> extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+        if (canImport) {
+            extensions.push_back(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
+            extensions.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
+        }
+        if (displayTiming) extensions.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
         VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         deviceInfo.queueCreateInfoCount = 1;
         deviceInfo.pQueueCreateInfos = &queueInfo;
-        deviceInfo.enabledExtensionCount = ahbMode ? 2 : 1;
-        deviceInfo.ppEnabledExtensionNames = deviceExtensions;
+        deviceInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+        deviceInfo.ppEnabledExtensionNames = extensions.data();
         v = vkCreateDevice(gpu, &deviceInfo, nullptr, &device);
         if (v != VK_SUCCESS) { error = vkError("vkCreateDevice", v); return false; }
         vkGetDeviceQueue(device, queueFamily, 0, &graphicsQueue);
+        if (displayTiming)
+            getTimings = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
+                vkGetDeviceProcAddr(device, "vkGetPastPresentationTimingGOOGLE"));
         VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         poolInfo.queueFamilyIndex = queueFamily;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -130,13 +158,55 @@ public:
         return createSwapchain(error);
     }
 
-    bool draw(uint64_t index, std::string& error) {
-        VkResult v = vkWaitForFences(device, 1, &inFlight, VK_TRUE, UINT64_MAX);
-        if (v != VK_SUCCESS) { error = vkError("vkWaitForFences", v); return false; }
+    bool supportsFG() const { return blit && canImport; }
+    bool hasDisplayTiming() const { return getTimings != nullptr; }
+    void forgetTimings() { pending.clear(); }
+    bool deviceLost() const { return lastResult == VK_ERROR_DEVICE_LOST; }
+    std::unique_ptr<FrameGeneration> createFG() {
+        return std::make_unique<FrameGeneration>(gpu, device, graphicsQueue, queueFamily);
+    }
+
+    std::vector<PresentedFrame> collectTimings() {
+        std::vector<PresentedFrame> observed;
+        if (!getTimings) return observed;
+        uint32_t count = 0;
+        if (getTimings(device, swapchain, &count, nullptr) != VK_SUCCESS || !count) return observed;
+        std::vector<VkPastPresentationTimingGOOGLE> results(count);
+        const auto result = getTimings(device, swapchain, &count, results.data());
+        if (result != VK_SUCCESS && result != VK_INCOMPLETE) return observed;
+        for (uint32_t i = 0; i < count; ++i) {
+            const auto& timing = results[i];
+            const auto found = std::find_if(pending.begin(), pending.end(),
+                [&](const auto& frame) { return frame.id == timing.presentID; });
+            if (found == pending.end()) continue;
+            if (timing.actualPresentTime) {
+                found->presentedNs = timing.actualPresentTime;
+                observed.push_back(*found);
+            }
+            pending.erase(found);
+        }
+        std::sort(observed.begin(), observed.end(), [](const PresentedFrame& a, const PresentedFrame& b) {
+            return a.presentedNs < b.presentedNs;
+        });
+        return observed;
+    }
+
+    bool draw(uint64_t index, std::string& error, const SceneFrame* scene = nullptr,
+              FrameGeneration* synthesis = nullptr, VkImage source = VK_NULL_HANDLE,
+              bool generated = false, uint64_t sampleNs = 0) {
+        sent = false;
+        if (source && !blit) {
+            if (generated) return true;
+            source = VK_NULL_HANDLE;
+        }
+        VkResult v = vkWaitForFences(device, 1, &inFlight, VK_TRUE, 250'000'000);
+        if (v == VK_TIMEOUT) return true;
+        if (v != VK_SUCCESS) return drawError("vkWaitForFences", v, error);
         uint32_t imageIndex = 0;
-        v = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        v = vkAcquireNextImageKHR(device, swapchain, 50'000'000, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        if (v == VK_TIMEOUT || v == VK_NOT_READY) return true;
         if (v == VK_ERROR_OUT_OF_DATE_KHR) return recreate(error);
-        if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) { error = vkError("vkAcquireNextImageKHR", v); return false; }
+        if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) return drawError("vkAcquireNextImageKHR", v, error);
         v = vkResetCommandBuffer(commandBuffer, 0);
         if (v != VK_SUCCESS) { error = vkError("vkResetCommandBuffer", v); return false; }
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -156,13 +226,19 @@ public:
         rp.renderArea.extent = extent;
         rp.clearValueCount = 1;
         rp.pClearValues = &background;
-        if (ahbMode) {
+        if (source) {
+            recordBlit(images[imageIndex], *synthesis, source);
+        } else if (ahbMode) {
             AhbOffscreen& current = offscreenFrames[index % offscreenFrames.size()];
             if (!current.ready()) { error = "Quadro AHB não inicializado."; return false; }
             current.record(commandBuffer, images[imageIndex], index);
+        } else if (scene) {
+            background.color = {{0.024f, 0.032f, 0.052f, 1.0f}};
+            vkCmdBeginRenderPass(commandBuffer, &rp, VK_SUBPASS_CONTENTS_INLINE);
+            drawScene(commandBuffer, *scene, fitScene(extent));
+            vkCmdEndRenderPass(commandBuffer);
         } else {
-        vkCmdBeginRenderPass(commandBuffer, &rp, VK_SUBPASS_CONTENTS_INLINE);
-        // A moving rectangle verifies actual Vulkan GPU presentation, not LSFG.
+            vkCmdBeginRenderPass(commandBuffer, &rp, VK_SUBPASS_CONTENTS_INLINE);
         int x = (int)((index * 6) % std::max(1u, extent.width));
         uint32_t barWidth = std::min(110u, extent.width - (uint32_t)x);
         VkClearAttachment clear{};
@@ -185,7 +261,7 @@ public:
 
         v = vkResetFences(device, 1, &inFlight);
         if (v != VK_SUCCESS) { error = vkError("vkResetFences", v); return false; }
-        VkPipelineStageFlags stage = ahbMode ? VK_PIPELINE_STAGE_TRANSFER_BIT :
+        VkPipelineStageFlags stage = (ahbMode || source) ? VK_PIPELINE_STAGE_TRANSFER_BIT :
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submit.waitSemaphoreCount = 1;
@@ -196,22 +272,82 @@ public:
         submit.signalSemaphoreCount = 1;
         submit.pSignalSemaphores = &presentSemaphores[imageIndex];
         v = vkQueueSubmit(graphicsQueue, 1, &submit, inFlight);
-        if (v != VK_SUCCESS) { error = vkError("vkQueueSubmit", v); return false; }
+        if (v != VK_SUCCESS) return drawError("vkQueueSubmit", v, error);
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         present.waitSemaphoreCount = 1;
         present.pWaitSemaphores = &presentSemaphores[imageIndex];
         present.swapchainCount = 1;
         present.pSwapchains = &swapchain;
         present.pImageIndices = &imageIndex;
+        VkPresentTimeGOOGLE stamp{nextPresentId++, 0};
+        VkPresentTimesInfoGOOGLE timestamps{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
+        if (getTimings) {
+            timestamps.swapchainCount = 1;
+            timestamps.pTimes = &stamp;
+            present.pNext = &timestamps;
+        }
         v = vkQueuePresentKHR(graphicsQueue, &present);
-        if (v == VK_ERROR_OUT_OF_DATE_KHR || v == VK_SUBOPTIMAL_KHR) return recreate(error);
-        if (v != VK_SUCCESS) { error = vkError("vkQueuePresentKHR", v); return false; }
+        if (v == VK_ERROR_OUT_OF_DATE_KHR) return recreate(error);
+        if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) return drawError("vkQueuePresentKHR", v, error);
+        sent = true;
+        if (getTimings) {
+            pending.push_back({stamp.presentID, generated, sampleNs});
+            if (pending.size() > 96) pending.pop_front();
+        }
         return true;
     }
 
+    bool sent = false;
+
 private:
+    bool drawError(const char* operation, VkResult result, std::string& error) {
+        lastResult = result;
+        error = vkError(operation, result);
+        return false;
+    }
+
+    void recordBlit(VkImage destination, const FrameGeneration& synthesis, VkImage source) {
+        VkImageMemoryBarrier target{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        target.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        target.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        target.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        target.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        target.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        target.image = destination;
+        target.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &target);
+        const VkRect2D area = fitScene(extent);
+        if (area.extent.width != extent.width || area.extent.height != extent.height) {
+            VkClearColorValue background{{0.024f, 0.032f, 0.052f, 1.0f}};
+            vkCmdClearColorImage(commandBuffer, destination, target.newLayout, &background, 1, &target.subresourceRange);
+            target.oldLayout = target.newLayout;
+            target.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &target);
+        }
+        synthesis.acquireRead(commandBuffer, source);
+        VkImageBlit region{};
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.srcOffsets[1] = {int32_t(FrameGeneration::extent.width), int32_t(FrameGeneration::extent.height), 1};
+        region.dstSubresource = region.srcSubresource;
+        region.dstOffsets[0] = {area.offset.x, area.offset.y, 0};
+        region.dstOffsets[1] = {area.offset.x + int32_t(area.extent.width),
+                                area.offset.y + int32_t(area.extent.height), 1};
+        vkCmdBlitImage(commandBuffer, source, VK_IMAGE_LAYOUT_GENERAL, destination, target.newLayout,
+                       1, &region, VK_FILTER_NEAREST);
+        synthesis.releaseRead(commandBuffer, source);
+        target.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        target.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        target.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        target.dstAccessMask = 0;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &target);
+    }
+
     bool recreate(std::string& error) {
-        vkDeviceWaitIdle(device);
+        VkResult idle = vkDeviceWaitIdle(device);
+        if (idle != VK_SUCCESS) return drawError("Reconstruir swapchain", idle, error);
         destroySwapchain();
         return createSwapchain(error);
     }
@@ -245,6 +381,13 @@ private:
             size.height = std::clamp((uint32_t)std::max(1, ANativeWindow_getHeight(window)), caps.minImageExtent.height, caps.maxImageExtent.height);
         }
         if (!size.width || !size.height) { error = "A superfície ainda não possui dimensões válidas."; return false; }
+        VkFormatProperties fgFormat{}, surfaceFormat{};
+        vkGetPhysicalDeviceFormatProperties(gpu, FrameGeneration::format, &fgFormat);
+        vkGetPhysicalDeviceFormatProperties(gpu, selected.format, &surfaceFormat);
+        blit = liveMode && canImport && (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) &&
+            (fgFormat.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) &&
+            (surfaceFormat.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT);
+        if (blit) requiredUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (ahbMode && selected.format != VK_FORMAT_R8G8B8A8_UNORM) {
             error = "Modo AHB exige swapchain VK_FORMAT_R8G8B8A8_UNORM."; return false;
         }
@@ -364,6 +507,7 @@ private:
         if (swapchain) vkDestroySwapchainKHR(device, swapchain, nullptr);
         swapchain = VK_NULL_HANDLE;
         images.clear();
+        pending.clear();
     }
     void cleanup() {
         if (device) {
@@ -378,7 +522,15 @@ private:
         if (instance) vkDestroyInstance(instance, nullptr);
     }
     ANativeWindow* window;
-    bool ahbMode = false;
+    bool ahbMode;
+    bool liveMode;
+    bool canImport = false;
+    bool blit = false;
+    bool displayTiming = false;
+    VkResult lastResult = VK_SUCCESS;
+    PFN_vkGetPastPresentationTimingGOOGLE getTimings = nullptr;
+    uint32_t nextPresentId = 1;
+    std::deque<PresentedFrame> pending;
     std::array<AhbOffscreen, 2> offscreenFrames;
     VkInstance instance = VK_NULL_HANDLE;
     VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -399,77 +551,350 @@ private:
     VkFence inFlight = VK_NULL_HANDLE;
 };
 
-struct Runner {
-    explicit Runner(ANativeWindow* w, int fps, bool ahb) : window(w), targetFps(fps), ahbMode(ahb) {}
-    ~Runner() { if (window) ANativeWindow_release(window); }
-    ANativeWindow* window;
-    int targetFps;
-    bool ahbMode;
-    std::atomic<bool> running{true};
-    std::mutex mu;
-    std::string status = "Iniciando o renderizador Vulkan...";
-    std::thread thread;
-    void setStatus(const std::string& value) { std::lock_guard<std::mutex> lock(mu); status = value; }
-    std::string getStatus() { std::lock_guard<std::mutex> lock(mu); return status; }
-    void execute() {
-        DemoRenderer renderer(window, ahbMode);
-        std::string error;
-        if (!renderer.init(error)) { setStatus("ERRO: " + error); running = false; return; }
-        auto last = Clock::now();
-        uint64_t frames = 0, total = 0;
-        double measuredFps = 0;
-        const auto frameTime = std::chrono::nanoseconds((int64_t)(1000000000.0 / targetFps));
-        auto next = Clock::now();
-        while (running) {
-            if (!renderer.draw(total++, error)) { setStatus("ERRO: " + error); running = false; break; }
-            frames++;
-            auto now = Clock::now();
-            double elapsed = std::chrono::duration<double>(now - last).count();
-            if (elapsed >= 1) {
-                measuredFps = frames / elapsed;
-                setStatus(std::string(ahbMode ? "Vulkan AHB duplo (2 quadros) → tela" : "Vulkan direto → tela") +
-                    " • " + std::to_string((int)(measuredFps + 0.5)) +
-                    " envios/s (não é FPS interpolado) • FG DESLIGADO");
-                frames = 0;
-                last = now;
+struct Metrics {
+    uint64_t originals = 0, sent = 0, sentGenerated = 0, shown = 0, shownGenerated = 0, omitted = 0;
+    uint64_t waitSamples = 0, latencySamples = 0, displaySamples = 0, lastDisplayNs = 0;
+    double batchMs = 0, latencyMs = 0, displayMs = 0;
+    bool everShownGenerated = false;
+    void record(const std::vector<PresentedFrame>& observed) {
+        for (const auto& frame : observed) {
+            ++shown;
+            shownGenerated += frame.generated;
+            everShownGenerated |= frame.generated;
+            if (frame.sampleNs && frame.presentedNs >= frame.sampleNs) {
+                latencyMs += (frame.presentedNs - frame.sampleNs) / 1e6;
+                ++latencySamples;
             }
-            next += frameTime;
-            if (next < now) next = now;
-            std::this_thread::sleep_until(next);
+            if (lastDisplayNs && frame.presentedNs > lastDisplayNs) {
+                displayMs += (frame.presentedNs - lastDisplayNs) / 1e6;
+                ++displaySamples;
+            }
+            if (frame.presentedNs > lastDisplayNs) lastDisplayNs = frame.presentedNs;
         }
     }
+
+    std::string report(double seconds, bool timing) {
+        std::ostringstream out;
+        out << std::fixed << std::setprecision(1);
+        out << originals / seconds << " FPS originais · ";
+        if (timing && shown) out << shown / seconds << " FPS na tela (" << shownGenerated << " FG)";
+        else out << sent / seconds << " envios/s (" << sentGenerated << " FG)";
+        if (displaySamples) out << "\n" << displayMs / displaySamples << " ms por quadro na tela";
+        if (waitSamples) out << "\nLSFG " << batchMs / waitSamples << " ms por lote (inclui espera)";
+        if (latencySamples) out << "\nCena → exibição " << latencyMs / latencySamples << " ms";
+        if (omitted) out << "\nFG descartados: " << omitted;
+        const bool seen = everShownGenerated;
+        const uint64_t previousDisplay = lastDisplayNs;
+        *this = {};
+        everShownGenerated = seen;
+        lastDisplayNs = previousDisplay;
+        return out.str();
+    }
 };
+
+class SceneSource {
+public:
+    SceneSource(JNIEnv* env, jobject object) : env(env), object(object) {
+        if (!object) return;
+        jclass type = env->GetObjectClass(object);
+        render = env->GetMethodID(type, "render", "(J[F)I");
+        env->DeleteLocalRef(type);
+        if (render) values = env->NewFloatArray(SceneFrame::kRectangles * SceneFrame::kFields);
+    }
+    ~SceneSource() { if (values) env->DeleteLocalRef(values); }
+
+    bool sample(uint64_t index, uint64_t nowNs, SceneFrame& scene) {
+        if (!object) {
+            scene = movingTestScene(index);
+            return true;
+        }
+        if (!render || !values) return false;
+        jint count = env->CallIntMethod(object, render, static_cast<jlong>(nowNs), values);
+        if (env->ExceptionCheck() || count < 0 || count > static_cast<jint>(SceneFrame::kRectangles)) return false;
+        scene.count = count;
+        env->GetFloatArrayRegion(values, 0, count * SceneFrame::kFields, scene.data.data());
+        return !env->ExceptionCheck();
+    }
+
+private:
+    JNIEnv* env;
+    jobject object;
+    jmethodID render = nullptr;
+    jfloatArray values = nullptr;
+};
+
+struct Runner {
+    ANativeWindow* window;
+    JavaVM* vm;
+    jobject game;
+    int targetFps;
+    bool ahbMode;
+    bool live;
+    std::string dll;
+    std::atomic<bool> fgRequested;
+    std::atomic<bool> running{true};
+    std::mutex surfaceMutex;
+    std::mutex wakeMutex;
+    std::condition_variable wake;
+    std::mutex statusMutex;
+    std::string status = "Abrindo Vulkan…";
+    std::string diagnostics;
+
+    Runner(ANativeWindow* w, JavaVM* vm, jobject game, int fps, bool ahb, bool live,
+           std::string path, bool fg)
+        : window(w), vm(vm), game(game), targetFps(fps), ahbMode(ahb), live(live),
+          dll(std::move(path)), fgRequested(fg) {}
+    ~Runner() { ANativeWindow_release(window); }
+
+    void stop() {
+        running = false;
+        wake.notify_all();
+        // Finish an in-progress WSI call before SurfaceHolder releases the window.
+        // Engine compilation, compute, and resource teardown stay on the render thread.
+        std::lock_guard<std::mutex> wsi(surfaceMutex);
+    }
+
+    void sleepUntil(Clock::time_point deadline) {
+        std::unique_lock<std::mutex> lock(wakeMutex);
+        wake.wait_until(lock, deadline, [&] { return !running.load(); });
+    }
+    void setStatus(std::string value, const std::string& report) {
+        std::lock_guard<std::mutex> lock(statusMutex);
+        status = std::move(value);
+        diagnostics = report;
+    }
+    std::string getStatus(bool detailed) {
+        std::lock_guard<std::mutex> lock(statusMutex);
+        return detailed && !diagnostics.empty() ? status + "\n\n" + diagnostics : status;
+    }
+
+    bool execute(SceneSource& source, const std::string& recovery = "") {
+        DemoRenderer renderer(window, ahbMode, live);
+        std::string error;
+        {
+            std::lock_guard<std::mutex> lock(surfaceMutex);
+            if (!running) return false;
+            if (!renderer.init(error)) {
+                setStatus("Vulkan indisponível", error);
+                return false;
+            }
+        }
+        std::unique_ptr<FrameGeneration> fg;
+        bool failed = !recovery.empty();
+        std::string detail = recovery;
+        std::string evidence;
+        uint32_t age = 0;
+        uint32_t validationAttempts = 0;
+        bool verified = false;
+        bool generatedSent = false;
+        const auto period = Ns(1'000'000'000 / targetFps);
+        auto next = Clock::now();
+        auto measure = next;
+        uint64_t sequence = 0;
+        Metrics metrics;
+        auto render = [&](const SceneFrame* frame, VkImage image, bool generated, uint64_t sampleNs) {
+            std::lock_guard<std::mutex> lock(surfaceMutex);
+            if (!running) return true;
+            if (!renderer.draw(sequence, error, frame, fg.get(), image, generated, sampleNs)) return false;
+            if (renderer.sent) {
+                ++metrics.sent;
+                metrics.sentGenerated += generated;
+                generatedSent |= generated;
+            } else if (generated) ++metrics.omitted;
+            metrics.record(renderer.collectTimings());
+            return true;
+        };
+        auto disable = [&](std::string why) {
+            failed = true;
+            detail = std::move(why);
+            // A submitted swapchain copy may still reference the shared images.
+            // FrameGeneration owns the same queue, which is drained at teardown.
+            fg.reset();
+            verified = false;
+            generatedSent = false;
+            const std::string header = detail.substr(0, detail.find('\n'));
+            setStatus("FG indisponível\n" + header, detail);
+            __android_log_print(ANDROID_LOG_WARN, "FrameRoomFG", "%s", detail.c_str());
+        };
+        while (running) {
+            const bool requested = live && fgRequested.load();
+            if (!requested && (fg || failed)) {
+                fg.reset();
+                failed = verified = generatedSent = false;
+                metrics.everShownGenerated = false;
+                renderer.forgetTimings();
+                age = validationAttempts = 0;
+                detail.clear();
+                evidence.clear();
+                if (recovery.empty()) setStatus("Frame Generation desligado", {});
+            }
+            if (requested && !fg && !failed) {
+                setStatus("Inicializando LSFG 2×…", {});
+                if (renderer.supportsFG()) {
+                    fg = renderer.createFG();
+                    if (fg->start(dll, error)) {
+                        detail = fg->backend();
+                        setStatus("LSFG iniciado. Verificando quadros…", detail);
+                    } else {
+                        const bool lost = fg->deviceLost();
+                        disable(error);
+                        if (lost) return true;
+                    }
+                } else disable("A GPU ou a superfície não oferece AHB e blit Vulkan para este modo.");
+                // Setup can compile shaders; exclude it from frame pacing and FPS.
+                next = measure = Clock::now();
+                metrics = {};
+                renderer.forgetTimings();
+            }
+            if (!running) break;
+            SceneFrame frame;
+            const uint64_t sampleNs = monotonicNs();
+            if (live && !source.sample(sequence, sampleNs, frame)) {
+                setStatus("O jogo não entregou um quadro válido", "O protocolo da cena cooperativa falhou.");
+                break;
+            }
+            ++metrics.originals;
+            VkImage original = VK_NULL_HANDLE;
+            if (fg) {
+                const bool warmup = age < 3;
+                const uint32_t current = age++ % 2;
+                double elapsed = 0;
+                if (!fg->renderInput(frame, current, error) || !fg->generate(warmup, elapsed, error)) {
+                    const bool lost = fg->deviceLost();
+                    disable(error + "\n" + detail);
+                    if (lost) return true;
+                } else {
+                    original = fg->original(current);
+                    if (!warmup) {
+                        metrics.batchMs += elapsed;
+                        ++metrics.waitSamples;
+                        if (!verified) {
+                            if (!fg->verify(current, verified, evidence)) {
+                                const bool lost = fg->deviceLost();
+                                disable(evidence + "\n" + detail);
+                                if (lost) return true;
+                                original = VK_NULL_HANDLE;
+                            } else if (!verified && ++validationAttempts >= 12) {
+                                disable("A imagem LSFG não passou na verificação de pixels.\n" + evidence + "\n" + detail);
+                                original = VK_NULL_HANDLE;
+                            }
+                        }
+                        if (verified && running && fgRequested) {
+                            const auto now = Clock::now();
+                            // Prefer an original frame if this batch has already consumed
+                            // the next original's slot. No repeat frame is submitted.
+                            if (now <= next + period) {
+                                if (!render(&frame, fg->generated(), true, sampleNs)) {
+                                    setStatus("Falha ao apresentar FG", error + "\n" + detail);
+                                    return renderer.deviceLost();
+                                }
+                                if (renderer.sent)
+                                    sleepUntil((std::min)(next + period, Clock::now() + period / 2));
+                            } else ++metrics.omitted;
+                        } else ++metrics.omitted;
+                    }
+                }
+            }
+            if (!render(live ? &frame : nullptr, original, false, sampleNs)) {
+                setStatus("Erro na apresentação Vulkan", error + "\n" + detail);
+                return renderer.deviceLost();
+            }
+            ++sequence;
+            auto now = Clock::now();
+            const double seconds = std::chrono::duration<double>(now - measure).count();
+            if (seconds >= 1.0) {
+                std::string state;
+                if (failed) state = "FG indisponível · Vulkan direto";
+                else if (!fg) state = live ? "FG desligado" : (ahbMode ? "Vulkan AHB duplo" : "Vulkan direto");
+                else if (metrics.everShownGenerated) state = "FG 2× confirmado pela tela";
+                else if (generatedSent) state = "FG 2× enviado à tela";
+                else if (verified) state = "Imagem LSFG verificada · aguardando envio";
+                else state = "LSFG 2× · verificando imagem";
+                const auto rates = metrics.report(seconds, renderer.hasDisplayTiming());
+                setStatus(state + "\n" + rates, evidence + (evidence.empty() ? "" : "\n") + detail +
+                    "\nLatência da cena: da amostra do jogo ao horário de exibição informado pelo Vulkan. " +
+                    "Sem VK_GOOGLE_display_timing, o contador usa envios à swapchain.");
+                measure = now;
+            }
+            next += period;
+            // Skip expired deadlines rather than submitting several originals at once.
+            if (next < now) next = now + period;
+            sleepUntil(next);
+        }
+        return false;
+    }
+
+    void run() {
+        JNIEnv* env = nullptr;
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+        if (running) {
+            SceneSource source(env, game);
+            if (execute(source) && running) {
+                __android_log_print(ANDROID_LOG_WARN, "FrameRoomFG", "Dispositivo Vulkan perdido; retomando em modo direto");
+                execute(source, "Dispositivo Vulkan perdido. Renderização direta retomada.");
+            }
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+        }
+        if (game) env->DeleteGlobalRef(game);
+        vm->DetachCurrentThread();
+    }
+};
+
 std::mutex globalMutex;
-std::unique_ptr<Runner> runner;
-void stopLocked() {
-    if (!runner) return;
-    runner->running = false;
-    if (runner->thread.joinable()) runner->thread.join();
+std::mutex renderMutex;
+std::shared_ptr<Runner> runner;
+jlong session = 0;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_frameroom_VulkanPlayerView_nativeStart(JNIEnv* env, jclass, jobject surface, jint fps,
+        jboolean ahb, jboolean live, jstring dll, jboolean fg, jobject game) {
+    std::lock_guard<std::mutex> lock(globalMutex);
+    if (runner) runner->stop();
     runner.reset();
-}
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_dev_frameroom_VulkanDemoActivity_nativeStart(JNIEnv* env, jclass, jobject surface, jint fps, jboolean ahb) {
-    std::lock_guard<std::mutex> lock(globalMutex);
-    stopLocked();
-    if (!surface) return;
+    if (!surface) return 0;
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-    if (!window) return;
-    runner = std::make_unique<Runner>(window, fps == 60 ? 60 : 30, ahb == JNI_TRUE);
-    Runner* current = runner.get();
-    current->thread = std::thread([current] { current->execute(); });
+    if (!window) return 0;
+    std::string path;
+    if (dll) {
+        const char* raw = env->GetStringUTFChars(dll, nullptr);
+        if (raw) {
+            path = raw;
+            env->ReleaseStringUTFChars(dll, raw);
+        }
+    }
+    JavaVM* vm = nullptr;
+    env->GetJavaVM(&vm);
+    runner = std::make_shared<Runner>(window, vm, game ? env->NewGlobalRef(game) : nullptr,
+        std::clamp(static_cast<int>(fps), 15, 60), ahb, live, std::move(path), fg);
+    std::thread([current = runner] {
+        std::lock_guard<std::mutex> lock(renderMutex);
+        current->run();
+    }).detach();
+    return ++session;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_dev_frameroom_VulkanDemoActivity_nativeStop(JNIEnv*, jclass) {
+Java_dev_frameroom_VulkanPlayerView_nativeStop(JNIEnv*, jclass, jlong id) {
     std::lock_guard<std::mutex> lock(globalMutex);
-    stopLocked();
+    if (runner && id == session) {
+        runner->stop();
+        runner.reset();
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_frameroom_VulkanPlayerView_nativeSetFrameGeneration(JNIEnv*, jclass, jlong id, jboolean enabled) {
+    std::lock_guard<std::mutex> lock(globalMutex);
+    if (runner && id == session) runner->fgRequested = enabled;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_dev_frameroom_VulkanDemoActivity_nativeStatus(JNIEnv* env, jclass) {
+Java_dev_frameroom_VulkanPlayerView_nativeStatus(JNIEnv* env, jclass, jlong id, jboolean detailed) {
     std::lock_guard<std::mutex> lock(globalMutex);
-    std::string value = runner ? runner->getStatus() : "Renderizador parado.";
+    const std::string value = runner && id == session ? runner->getStatus(detailed) : "Aguardando superfície Vulkan…";
     return env->NewStringUTF(value.c_str());
 }

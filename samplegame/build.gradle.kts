@@ -8,9 +8,11 @@ android {
         applicationId = "dev.frameroom.samplegame"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0-test"
+        versionCode = 2
+        versionName = "2.0-vulkan-test"
     }
+
+    sourceSets["main"].java.srcDir(rootProject.file("game-api/src/main/java"))
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
