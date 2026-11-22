@@ -877,7 +877,9 @@ struct Runner {
                 else if (metrics.sentGenerated) state = "FG 2× enviado à tela";
                 else if (verified) state = "FG sem apresentação neste intervalo";
                 else state = "LSFG 2× · verificando imagem";
-                const double originalRate = (metrics.sent - metrics.sentGenerated) / seconds;
+                const double originalRate = metrics.shown
+                    ? (metrics.shown - metrics.shownGenerated) / seconds
+                    : (metrics.sent - metrics.sentGenerated) / seconds;
                 if (verified && originalRate < targetFps * .85) ++slowWindows;
                 else slowWindows = 0;
                 reduceAfterOriginal |= slowWindows >= 2;

@@ -1,3 +1,10 @@
+# R0.11 — cadência de FG e Arena incluída
+
+- Remove a espera de um período extra após atraso e organiza a apresentação dos quadros pelo relógio da tela.
+- Preserva a resolução dos originais e reduz a resolução da interpolação quando falta tempo. Retoma Vulkan direto se a geração continuar a afetar a cadência.
+- Inclui o APK cooperativo da Arena dentro do FrameRoom. O build de teste instala ao lado da R0.10.
+- Registra os resultados do POCO e o requisito de sincronização para compor quadros de um Android convidado.
+
 # R0.10 — apresentação Vulkan e biblioteca mobile
 
 - Envia o resultado da Bloodframe à swapchain, com dois originais distintos, validação inicial de pixels, pacing e fallback Vulkan direto.

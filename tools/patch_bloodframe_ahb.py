@@ -6,6 +6,7 @@ import sys
 
 PIN = "f4ac713aef58d9403a136e179b3b0d163d85eb66"
 DEVICE = Path("framegen/src/core/device.cpp")
+C_API = Path("android/bb_lsfg.cpp")
 CONTEXTS = [Path(f"framegen/{v}_src/context.cpp") for v in ("v3.1", "v3.1p")]
 
 TARGET = """using namespace LSFG::Core;"""
@@ -18,8 +19,7 @@ thread_local uint32_t frameRoomHeight = 360;
 
 // The legacy batch diagnostic keeps 640x360. An active render session asks
 // the gralloc probe to check the exact RGBA8 dimensions it will allocate.
-extern "C" __attribute__((visibility("default")))
-void bb_lsfg_frameroom_probe_extent(uint32_t width, uint32_t height) {
+extern "C" void frameroom_set_ahb_probe_extent(uint32_t width, uint32_t height) {
     frameRoomWidth = width ? width : 640;
     frameRoomHeight = height ? height : 360;
 }
@@ -94,6 +94,20 @@ def patch_device(source: str) -> str:
         VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);""")
 
 
+def patch_api(source: str) -> str:
+    # The static framegen archive is linked with --exclude-libs,ALL.
+    # The entrypoint must live in the shared library's C API translation unit.
+    anchor = 'extern "C" {\n\nstatic int init_backend'
+    return replace_once(source, anchor, """extern "C" {
+
+void frameroom_set_ahb_probe_extent(uint32_t width, uint32_t height);
+BB_LSFG_API void bb_lsfg_frameroom_probe_extent(uint32_t width, uint32_t height) {
+    frameroom_set_ahb_probe_extent(width, height);
+}
+
+static int init_backend""")
+
+
 def patch_context(source: str) -> str:
     # -1 means the host already waited. Importing it as a semaphore would
     # still require VK_KHR_external_semaphore_fd on the host-wait-only path.
@@ -120,7 +134,9 @@ def self_test() -> None:
     updated = patch_device(device)
     assert "AHardwareBuffer_allocate(&desc, &buffer)" in updated
     assert "desc.width = frameRoomWidth" in updated
-    assert "bb_lsfg_frameroom_probe_extent" in updated
+    assert "frameroom_set_ahb_probe_extent" in updated
+    api = patch_api('extern "C" {\n\nstatic int init_backend')
+    assert "BB_LSFG_API void bb_lsfg_frameroom_probe_extent" in api
     assert "baseAllocation && probeAhbImageUsage" in updated
     assert "baseUsage | AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER" in updated
     assert "VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME" in updated
@@ -150,7 +166,8 @@ def main(argv: list[str]) -> int:
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if revision != PIN:
         raise ValueError(f"Expected Bloodframe {PIN}, got {revision}")
-    files = {DEVICE: patch_device, **{context: patch_context for context in CONTEXTS}}
+    files = {DEVICE: patch_device, C_API: patch_api,
+             **{context: patch_context for context in CONTEXTS}}
     updates = {file: patch((root / file).read_text()) for file, patch in files.items()}
     for file, source in updates.items():
         (root / file).write_text(source)

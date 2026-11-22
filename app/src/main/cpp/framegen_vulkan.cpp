@@ -53,7 +53,7 @@ struct FrameGeneration::Api {
     template <typename T> T load(const char* name) const {
         return module ? reinterpret_cast<T>(dlsym(module, name)) : nullptr;
     }
-    bool ready() const { return init && create && present && wait && destroy && shutdown; }
+    bool ready() const { return setExtent && init && create && present && wait && destroy && shutdown; }
 };
 
 FrameGeneration::FrameGeneration(VkPhysicalDevice physical, VkDevice device, VkQueue queue,
@@ -247,7 +247,7 @@ bool FrameGeneration::start(const std::string& dll, std::string& error) {
     // FP32 is the tested initialization path on the user's Adreno.
     BbLsfgInfo transport{};
     char message[1024]{};
-    if (api->setExtent) api->setExtent(extent.width, extent.height);
+    api->setExtent(extent.width, extent.height);
     if (api->init(&config, &transport, message, sizeof(message)) != 0) {
         error = std::string("Inicialização LSFG: ") + message;
         return false;

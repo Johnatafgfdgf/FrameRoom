@@ -1,4 +1,10 @@
-# FrameRoom R0.10
+# FrameRoom R0.11
+
+A R0.11 protege a cadência dos originais no pipeline Vulkan. A Arena já vem no APK e pode ser aberta com **Jogos → Arena FrameRoom → Jogar**. O build de teste instala ao lado da R0.10. Importe sua Lossless.dll pela aba **Motor**.
+
+[Correções de desempenho e situação do espaço paralelo](docs/R11-PACING-GUEST.md)
+
+## Base da R0.10
 
 FrameRoom é um aplicativo Android ARM64 que executa jogos cooperativos e integra o LSFG da Bloodframe a um renderizador Vulkan próprio. A R0.10 inclui uma cena de teste e a Arena, cujo código de jogo vem de um APK separado. Os dois caminhos usam o mesmo renderizador.
 
