@@ -6,7 +6,7 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
-    <application android:allowBackup="false" android:label="FrameRoom" android:theme="@style/FrameRoomTheme" android:icon="@drawable/ic_frameroom" android:usesCleartextTraffic="false">
+    <application android:allowBackup="false" android:label="@string/frameroom_label" android:theme="@style/FrameRoomTheme" android:icon="@drawable/ic_frameroom" android:usesCleartextTraffic="false">
         <activity android:name=".HostedGameActivity" android:exported="false" android:process=":virtualgame" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity android:name=".VulkanDemoActivity" android:exported="false" android:process=":virtualgfx" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity android:name=".AppPickerActivity" android:exported="false" />

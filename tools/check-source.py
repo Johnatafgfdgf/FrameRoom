@@ -19,8 +19,8 @@ checks = {
   'Query image format support': 'vkGetPhysicalDeviceImageFormatProperties2' in ahb,
   'Record GPU render/copy commands': all(key in ahb for key in ('vkCmdClearColorImage', 'vkCmdCopyBufferToImage', 'vkCmdCopyImage', 'vkCmdPipelineBarrier')),
   'Acquire synchronization waits for transfer': 'VK_PIPELINE_STAGE_TRANSFER_BIT :' in cpp,
-  'New APK version': 'versionName = "0.10.0"' in gradle,
-  'CI uploads apk and failure logs': 'FrameRoom-r0.10-debug-apk' in workflow and 'FrameRoom-r0.10-build-log' in workflow,
+  'New APK version': 'versionName = "0.11.0"' in gradle,
+  'CI uploads apk and failure logs': 'FrameRoom-r0.11-debug-apk' in workflow and 'FrameRoom-r0.11-build-log' in workflow,
   'AHB ring owns two source frames': 'std::array<AhbOffscreen, 2>' in cpp and 'current.record(' in cpp,
   'Export source buffer accessor': 'hardwareBuffer() const' in (r/'app/src/main/cpp/ahb_offscreen.h').read_text(),
   'Only public Android NDK link libraries': 'nativewindow' not in cmake and 'vulkan android log' in cmake,
@@ -60,6 +60,10 @@ checks = {
   'Hosted Vulkan game uses the co-signed APK implementation': 'createVulkanScene' in
       (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text() and
       'VULKAN_GAME_API' in (r/'samplegame/src/main/AndroidManifest.xml').read_text(),
+  'Arena loads its embedded APK through the verified classloader path': 'stageEmbeddedArena' in gradle and
+      'loadEntry(path,' in (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text(),
+  'GPU scheduler uses display timestamps and skips late interpolated frames': 'desiredPresentNs' in cpp and
+      'pacing::pairTimes(' in cpp and 'render(live ? &frame : nullptr, VK_NULL_HANDLE' in cpp,
   'No AHB image requirements fetched prior to binding': all('vkGetImageMemoryRequirements(' not in source for source in
       (ahb, fg, (r/'app/src/main/cpp/framegen_batch.cpp').read_text())),
   'No MediaProjection API': 'android.media.projection' not in java and 'createScreenCaptureIntent(' not in java and 'AMediaProjection' not in cpp,

@@ -1,5 +1,13 @@
 plugins { id("com.android.application") }
 
+val stageEmbeddedArena by tasks.registering(Sync::class) {
+    dependsOn(":samplegame:assembleDebug")
+    from(rootProject.file("samplegame/build/outputs/apk/debug/samplegame-debug.apk")) {
+        rename { "arena.apk" }
+    }
+    into(layout.buildDirectory.dir("generated/arenaAssets"))
+}
+
 android {
     namespace = "dev.frameroom"
     compileSdk = 35
@@ -10,8 +18,8 @@ android {
         applicationId = "dev.frameroom"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.10.0"
+        versionCode = 11
+        versionName = "0.11.0"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
@@ -21,13 +29,27 @@ android {
         }
     }
 
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".r11"
+            resValue("string", "frameroom_label", "FrameRoom R0.11")
+        }
+        getByName("release") {
+            resValue("string", "frameroom_label", "FrameRoom")
+        }
+    }
+
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
     sourceSets["main"].java.srcDir(rootProject.file("game-api/src/main/java"))
+    sourceSets["main"].assets.srcDir(stageEmbeddedArena)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+// The same cooperative APK is published by Actions and embedded in FrameRoom.
+tasks.named("preBuild").configure { dependsOn(stageEmbeddedArena) }

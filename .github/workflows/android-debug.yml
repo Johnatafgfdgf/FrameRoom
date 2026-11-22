@@ -78,14 +78,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.10-build-log
+          name: FrameRoom-r0.11-build-log
           path: build.log
           if-no-files-found: ignore
       - name: Enviar APK debug
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.10-debug-apk
+          name: FrameRoom-r0.11-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -93,6 +93,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.10-cooperative-demo-apk
+          name: FrameRoom-r0.11-cooperative-demo-apk
           path: samplegame/build/outputs/apk/debug/samplegame-debug.apk
           if-no-files-found: error

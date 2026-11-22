@@ -16,6 +16,7 @@ import dev.frameroom.sdk.GameScene;
 public final class HostedGameActivity extends Activity {
     static final String TRUSTED_SAMPLE = "dev.frameroom.samplegame";
     static final String EXTRA_PACKAGE = "packageName";
+    static final String EXTRA_EMBEDDED = "embeddedArena";
     static final String EXTRA_FG = "frameGeneration";
     static final String EXTRA_FPS = "originalFps";
     private static final String ENTRY_KEY = "dev.frameroom.GAME_ENTRY";
@@ -49,6 +50,10 @@ public final class HostedGameActivity extends Activity {
         super.onCreate(savedInstanceState);
         String pkg = getIntent().getStringExtra(EXTRA_PACKAGE);
         showMessage("Preparando jogo hospedado…");
+        if (getIntent().getBooleanExtra(EXTRA_EMBEDDED, false)) {
+            new Thread(() -> loadEmbeddedArena(), "frameroom-arena-load").start();
+            return;
+        }
         if (!acceptsPackage(this, pkg)) {
             showMessage("É necessário um APK cooperativo com a mesma assinatura do FrameRoom.");
             return;
@@ -69,10 +74,7 @@ public final class HostedGameActivity extends Activity {
             if (snapshot == null || !snapshot.version.equals(version) || snapshot.files != archiveCount)
                 GamePackageSnapshot.prepare(this, pkg);
             String dexPath = GamePackageSnapshot.verifiedDexPath(this, pkg);
-            DexClassLoader loader = new DexClassLoader(dexPath, getCodeCacheDir().getAbsolutePath(), null, getClassLoader());
-            Class<?> entry = loader.loadClass(entrypoint);
-            if (entry.getClassLoader() != loader)
-                throw new SecurityException("A entrada precisa pertencer ao APK hospedado.");
+            Class<?> entry = loadEntry(dexPath, entrypoint);
             String title = getPackageManager().getApplicationLabel(app).toString();
             Method factory = entry.getMethod(vulkan ? "createVulkanScene" : "createView", Context.class);
             GameStorage storage = new GameStorage(this, pkg);
@@ -84,6 +86,27 @@ public final class HostedGameActivity extends Activity {
         } catch (Exception | LinkageError error) {
             runOnUiThread(() -> { if (!destroyed) showMessage("Falha ao hospedar o APK\n" + describe(error)); });
         }
+    }
+
+    private void loadEmbeddedArena() {
+        try {
+            String path = EmbeddedArena.materialize(this).getAbsolutePath();
+            Class<?> entry = loadEntry(path, "dev.frameroom.samplegame.GameEntry");
+            Method factory = entry.getMethod("createVulkanScene", Context.class);
+            GameScene scene = (GameScene) factory.invoke(null, new GameStorage(this, TRUSTED_SAMPLE));
+            if (scene == null) throw new IllegalStateException("A Arena incluída não entregou uma cena.");
+            runOnUiThread(() -> startScene("Arena FrameRoom", scene));
+        } catch (Exception | LinkageError error) {
+            runOnUiThread(() -> { if (!destroyed) showMessage("Falha ao abrir a Arena\n" + describe(error)); });
+        }
+    }
+
+    private Class<?> loadEntry(String dexPath, String entrypoint) throws ClassNotFoundException {
+        DexClassLoader loader = new DexClassLoader(dexPath, getCodeCacheDir().getAbsolutePath(), null, getClassLoader());
+        Class<?> entry = loader.loadClass(entrypoint);
+        if (entry.getClassLoader() != loader)
+            throw new SecurityException("A entrada precisa pertencer ao APK hospedado.");
+        return entry;
     }
 
     private void startScene(String title, GameScene scene) {

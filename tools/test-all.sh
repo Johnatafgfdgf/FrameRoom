@@ -9,3 +9,6 @@ trap 'rm -rf "$scratch"' EXIT
 "${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror \
     -I "$ROOT/app/src/main/cpp" "$ROOT/tests/frame_validation_test.cpp" -o "$scratch/frame-validation"
 "$scratch/frame-validation"
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror \
+    -I "$ROOT/app/src/main/cpp" "$ROOT/tests/frame_pacing_test.cpp" -o "$scratch/frame-pacing"
+"$scratch/frame-pacing"

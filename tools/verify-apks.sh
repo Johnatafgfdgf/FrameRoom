@@ -18,12 +18,14 @@ if grep -Ei '\.dll$' <<<"$apk_files" || grep '^lib/' <<<"$apk_files" | grep -v '
     exit 1
 fi
 "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$apk"
-python3 - "$apk" <<'PYELF'
+python3 - "$apk" "$arena" <<'PYELF'
+from pathlib import Path
 from struct import unpack_from
 from sys import argv
 from zipfile import ZipFile
 
 with ZipFile(argv[1]) as apk:
+    assert apk.read("assets/arena.apk") == Path(argv[2]).read_bytes(), "Wrong embedded Arena APK"
     for name in apk.namelist():
         if not name.endswith(".so"):
             continue
@@ -41,5 +43,5 @@ with ZipFile(argv[1]) as apk:
             assert alignment >= 16384 and (offset - address) % 16384 == 0, name
         assert loads, name
 PYELF
-echo "PASS: both APK signatures match, native libraries are ARM64 with 16 KiB alignment, and no DLL is bundled."
+echo "PASS: the embedded Arena is the separately built APK; both signatures, ARM64, 16 KiB alignment and DLL exclusion verified."
 sha256sum "$apk" "$arena"

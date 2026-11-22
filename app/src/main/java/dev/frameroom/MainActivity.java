@@ -147,6 +147,9 @@ public final class MainActivity extends Activity {
         list.removeAllViews();
         String term = query.trim().toLowerCase(Locale.ROOT);
         List<String> packages = new ArrayList<>(AppLibrary.all(this));
+        packages.remove(HostedGameActivity.TRUSTED_SAMPLE);
+        if ("arena frameroom".contains(term) || HostedGameActivity.TRUSTED_SAMPLE.contains(term))
+            list.addView(arenaCard());
         packages.sort(Comparator.comparing(pkg -> label(pkg).toLowerCase(Locale.ROOT)));
         for (String pkg : packages) {
             String name = label(pkg);
@@ -184,6 +187,27 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private View arenaCard() {
+        LinearLayout card = Ui.row(this);
+        card.setBackground(Ui.shape(this, Ui.PANEL, 16, Ui.OUTLINE));
+        Ui.pad(card, 12, 10, 12, 10);
+        card.addView(gameIcon(HostedGameActivity.TRUSTED_SAMPLE),
+            new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
+        LinearLayout title = Ui.column(this);
+        Ui.pad(title, 10, 0, 7, 0);
+        title.addView(Ui.text(this, "Arena FrameRoom", 16, Ui.TEXT, true));
+        TextView settings = Ui.text(this, "Configurar FPS e FG", 13, Ui.ACCENT, false);
+        settings.setOnClickListener(view -> gameDetails(HostedGameActivity.TRUSTED_SAMPLE));
+        settings.setMinHeight(Ui.dp(this, 30));
+        title.addView(settings);
+        card.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        card.addView(Ui.button(this, "Jogar", true, () -> play(HostedGameActivity.TRUSTED_SAMPLE)));
+        LinearLayout wrapper = Ui.column(this);
+        wrapper.addView(card);
+        Ui.space(wrapper, 10);
+        return wrapper;
+    }
+
     private ImageView gameIcon(String pkg) {
         ImageView icon = new ImageView(this);
         try { icon.setImageDrawable(getPackageManager().getApplicationIcon(pkg)); }
@@ -207,6 +231,7 @@ public final class MainActivity extends Activity {
         GameSettings settings = new GameSettings(this, pkg);
         Intent intent = new Intent(this, HostedGameActivity.class);
         intent.putExtra(HostedGameActivity.EXTRA_PACKAGE, pkg);
+        intent.putExtra(HostedGameActivity.EXTRA_EMBEDDED, HostedGameActivity.TRUSTED_SAMPLE.equals(pkg));
         intent.putExtra(HostedGameActivity.EXTRA_FG, settings.enabled());
         intent.putExtra(HostedGameActivity.EXTRA_FPS, settings.fps());
         startActivity(intent);
@@ -229,7 +254,8 @@ public final class MainActivity extends Activity {
         Ui.space(content, 12);
         GameSettings settings = new GameSettings(this, pkg);
         GamePackageSnapshot.Snapshot snapshot = GamePackageSnapshot.latest(this, pkg);
-        boolean supported = HostedGameActivity.supportsVulkan(this, pkg);
+        boolean arena = HostedGameActivity.TRUSTED_SAMPLE.equals(pkg);
+        boolean supported = arena || HostedGameActivity.supportsVulkan(this, pkg);
         if (supported) {
             Switch fg = new Switch(this);
             fg.setText("Frame Generation 2× ao iniciar");
@@ -260,10 +286,6 @@ public final class MainActivity extends Activity {
                 }));
         } else {
             append(content, GamePackageSnapshot.installedReport(this, pkg));
-            if (HostedGameActivity.TRUSTED_SAMPLE.equals(pkg) &&
-                getPackageManager().checkSignatures(getPackageName(), pkg) == PackageManager.SIGNATURE_MATCH) {
-                addButton(content, "Jogar no modo Canvas", false, () -> { sheet.dismiss(); play(pkg); });
-            }
             addButton(content, "Abrir no Android · sem FG", false, () -> {
                 Intent intent = getPackageManager().getLaunchIntentForPackage(pkg);
                 if (intent == null) toast("O aplicativo não está instalado.");
@@ -271,7 +293,7 @@ public final class MainActivity extends Activity {
             });
         }
         if (snapshot != null) append(content, snapshot.report());
-        addButton(content, snapshot == null ? "Preparar APKs" : "Atualizar cópia dos APKs", false, () -> {
+        if (!arena) addButton(content, snapshot == null ? "Preparar APKs" : "Atualizar cópia dos APKs", false, () -> {
             sheet.dismiss();
             runBusy(() -> { GamePackageSnapshot.prepare(getApplicationContext(), pkg); return "Cópia dos APKs preparada."; });
         });
@@ -280,7 +302,7 @@ public final class MainActivity extends Activity {
                 sheet.dismiss();
                 runBusy(() -> "Cópias apagadas: " + GamePackageSnapshot.remove(this, pkg));
             }));
-        addButton(content, "Remover da biblioteca", false, () -> {
+        if (!arena) addButton(content, "Remover da biblioteca", false, () -> {
             AppLibrary.remove(this, pkg);
             sheet.dismiss();
             renderGames();
