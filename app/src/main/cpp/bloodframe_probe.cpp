@@ -12,7 +12,7 @@ namespace {
 std::mutex guard;
 std::string probe(const std::string& path) {
     void* module=dlopen("libbloodframe.so",RTLD_NOW|RTLD_LOCAL);
-    if(!module) return std::string("Bloodframe indisponível: ")+(dlerror()?dlerror():"dlopen falhou");
+    if(!module) { const char* why=dlerror(); return std::string("Bloodframe indisponível: ")+(why?why:"dlopen falhou"); }
     auto init=reinterpret_cast<decltype(&bb_lsfg_init)>(dlsym(module,"bb_lsfg_init"));
     auto shutdown=reinterpret_cast<decltype(&bb_lsfg_shutdown)>(dlsym(module,"bb_lsfg_shutdown"));
     auto diag=reinterpret_cast<decltype(&bb_lsfg_diagnostics)>(dlsym(module,"bb_lsfg_diagnostics"));
