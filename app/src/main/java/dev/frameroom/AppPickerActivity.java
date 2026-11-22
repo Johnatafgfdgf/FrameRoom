@@ -37,7 +37,7 @@ public class AppPickerActivity extends Activity {
         title.setTextColor(Color.WHITE);
         root.addView(title);
         TextView notice = new TextView(this);
-        notice.setText("Adiciona um atalho à biblioteca. Os aplicativos ainda NÃO são virtualizados e NÃO recebem Frame Generation.");
+        notice.setText("Adiciona o jogo à lista. Você poderá preparar uma cópia privada dos APKs, mas não jogá-la em espaço paralelo nesta versão.");
         notice.setTextColor(Color.LTGRAY);
         notice.setPadding(0, 10, 0, 14);
         root.addView(notice);

@@ -1,3 +1,9 @@
+# R0.7 — preparação de pacote e processo gráfico
+- Snapshot privado do APK base e splits instalados, com SHA-256 e validação ZIP.
+- Indicadores de versão/motor estimado/ABI; aviso explícito de cópia não executável.
+- Renderizador Vulkan de demonstração no processo Android :virtualgfx.
+- Não implementa ainda clonagem executável nem Frame Generation de jogos externos.
+
 # R0.6 — lote GPU LSFG 2× (sem apresentação)
 - FrameGen batch headless 640×360, duas entradas Vulkan AHB e uma saída com flags do backend.
 - `create_context`, `present` com um quadro gerado e espera de sincronização.
