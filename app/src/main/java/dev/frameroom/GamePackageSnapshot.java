@@ -70,13 +70,17 @@ final class GamePackageSnapshot {
                 MessageDigest sha=MessageDigest.getInstance("SHA-256");
                 long copied=0;
                 try(InputStream input=new BufferedInputStream(new FileInputStream(source));
-                    OutputStream out=new BufferedOutputStream(new FileOutputStream(output))){
+                    FileOutputStream raw=new FileOutputStream(output)){
+                    // Android 14+: DEX/APK code must be read-only before content is written.
+                    if (!output.setReadOnly()) throw new IOException("Não foi possível tornar o APK somente leitura.");
+                    OutputStream out=new BufferedOutputStream(raw);
                     byte[] buffer=new byte[131072];
                     int read;
                     while((read=input.read(buffer))!=-1){
                         if(read==0)continue;
                         out.write(buffer,0,read);sha.update(buffer,0,read);copied+=read;
                     }
+                    out.flush();
                 }
                 if(copied!=source.length())throw new IOException("Cópia incompleta: "+name);
                 bytes+=copied;
@@ -133,6 +137,62 @@ final class GamePackageSnapshot {
         int removed=0;
         for(File dir:dirs)if(deleteTree(dir))removed++;
         return removed;
+    }
+
+
+    /**
+     * Read-only DEX path for a cooperative APK with EXACT package identity and
+     * matching signatures. We also verify that the staged APKs still match
+     * both the snapshot manifest and the currently installed signed APK.
+     */
+    static String verifiedDexPath(Context context,String packageName) throws Exception {
+        if(!"dev.frameroom.samplegame".equals(packageName))
+            throw new SecurityException("APK externo não compatível com runtime cooperativo.");
+        PackageManager pm=context.getPackageManager();
+        if(pm.checkSignatures(context.getPackageName(),packageName)!=PackageManager.SIGNATURE_MATCH)
+            throw new SecurityException("APK de teste com assinatura diferente do FrameRoom.");
+        Snapshot selected=latest(context,packageName);
+        if(selected==null)throw new IOException("Primeiro prepare uma cópia privada dos APKs.");
+        File dir=new File(new File(context.getFilesDir(),"apk_snapshots"),selected.id);
+        if(!dir.isDirectory())throw new IOException("Snapshot não encontrado.");
+        JSONObject manifest=new JSONObject(new String(
+            java.nio.file.Files.readAllBytes(new File(dir,"snapshot.json").toPath()),StandardCharsets.UTF_8));
+        if(!packageName.equals(manifest.getString("package")))
+            throw new SecurityException("Nome de pacote do snapshot incompatível.");
+        JSONArray files=manifest.getJSONArray("files");
+        ApplicationInfo info=pm.getApplicationInfo(packageName,0);
+        ArrayList<File> installed=new ArrayList<>();
+        installed.add(new File(info.sourceDir));
+        if(info.splitSourceDirs!=null)for(String path:info.splitSourceDirs)if(path!=null)
+            installed.add(new File(path));
+        if(files.length()!=installed.size())throw new SecurityException("A divisão de APKs foi alterada.");
+        StringJoiner paths=new StringJoiner(File.pathSeparator);
+        for(int i=0;i<installed.size();i++){
+            JSONObject entry=files.getJSONObject(i);
+            String expectedName=i==0?"base.apk":String.format(Locale.ROOT,"split-%03d.apk",i);
+            if(!expectedName.equals(entry.getString("name")))
+                throw new SecurityException("Arquivo split inesperado.");
+            File staged=new File(dir,expectedName);
+            if(!staged.isFile())throw new IOException("APK copiado não foi encontrado.");
+            if(!staged.setReadOnly())throw new IOException("APK não pôde ser bloqueado para escrita.");
+            if(staged.canWrite())throw new SecurityException("APK carregável ainda pode ser modificado.");
+            String recorded=entry.getString("sha256");
+            if(!recorded.equalsIgnoreCase(digest(staged)) ||
+               !recorded.equalsIgnoreCase(digest(installed.get(i))))
+                throw new SecurityException("APK copiado não corresponde ao jogo instalado.");
+            paths.add(staged.getAbsolutePath());
+        }
+        return paths.toString();
+    }
+
+    private static String digest(File file) throws Exception {
+        MessageDigest sha=MessageDigest.getInstance("SHA-256");
+        try(InputStream input=new BufferedInputStream(new FileInputStream(file))){
+            byte[] buffer=new byte[131072];
+            int n;
+            while((n=input.read(buffer))!=-1)if(n>0)sha.update(buffer,0,n);
+        }
+        return hex(sha.digest());
     }
 
     private static boolean deleteTree(File root){

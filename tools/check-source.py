@@ -17,8 +17,8 @@ checks = {
   'Query image format support': 'vkGetPhysicalDeviceImageFormatProperties2' in ahb,
   'Record GPU render/copy commands': all(key in ahb for key in ('vkCmdClearColorImage', 'vkCmdCopyBufferToImage', 'vkCmdCopyImage', 'vkCmdPipelineBarrier')),
   'Acquire synchronization waits for transfer': 'VK_PIPELINE_STAGE_TRANSFER_BIT :' in cpp,
-  'New APK version': 'versionName = "0.7.0"' in gradle,
-  'CI uploads apk and failure logs': 'FrameRoom-r0.7-debug-apk' in workflow and 'FrameRoom-r0.7-build-log' in workflow,
+  'New APK version': 'versionName = "0.8.0"' in gradle,
+  'CI uploads apk and failure logs': 'FrameRoom-r0.8-debug-apk' in workflow and 'FrameRoom-r0.8-build-log' in workflow,
   'AHB ring owns two source frames': 'std::array<AhbOffscreen, 2>' in cpp and 'current.record(' in cpp,
   'Export source buffer accessor': 'hardwareBuffer() const' in (r/'app/src/main/cpp/ahb_offscreen.h').read_text(),
   'Only public Android NDK link libraries': 'nativewindow' not in cmake and 'vulkan android log' in cmake,
@@ -35,6 +35,17 @@ checks = {
   'Graphics process separated': 'android:process=":virtualgfx"' in (r/'app/src/main/AndroidManifest.xml').read_text(),
   'Snapshots are explicitly nonexecutable': 'APK_COPIED_RUNTIME_NOT_AVAILABLE' in
       (r/'app/src/main/java/dev/frameroom/GamePackageSnapshot.java').read_text(),
+  'APK host process declared': 'android:process=":virtualgame"' in
+      (r/'app/src/main/AndroidManifest.xml').read_text(),
+  'Cooperative demo is a separately built APK': 'include(":app", ":samplegame")' in
+      (r/'settings.gradle.kts').read_text() and
+      'samplegame:assembleDebug' in workflow,
+  'Host verifies signed sample package': 'checkSignatures' in
+      (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text() and
+      'dev.frameroom.samplegame' in (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text(),
+  'Hosted DEX code is read-only': 'setReadOnly()' in
+      (r/'app/src/main/java/dev/frameroom/GamePackageSnapshot.java').read_text() and
+      'DexClassLoader' in (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text(),
   'No MediaProjection API': 'android.media.projection' not in java and 'createScreenCaptureIntent(' not in java and 'AMediaProjection' not in cpp,
 }
 for name, ok in checks.items():

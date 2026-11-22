@@ -6,4 +6,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "FrameRoom"
-include(":app")
+include(":app", ":samplegame")

@@ -1,23 +1,31 @@
-# FrameRoom R0.7 — APK snapshots + processo gráfico separado
+# FrameRoom R0.8 — APK cooperativo executado pelo FrameRoom (prova de conceito)
 
-**NÃO executa clones de jogos ainda.** A meta continua sendo um espaço paralelo rootless que controle o pipeline Vulkan do aplicativo e aplique Bloodframe com a DLL do usuário.
+**Esta R0.8 não é um Parallel Space universal.** Ela acrescenta uma demonstração verificável de execução de código de um APK independente dentro do processo do FrameRoom, sem root, por um mecanismo estritamente limitado a um APK de teste de mesma assinatura.
 
-## O que a R0.7 acrescenta
-- A partir de um jogo instalado e visível ao Android, o FrameRoom tenta copiar o APK base e todos os APKs split para seu armazenamento privado. Cada arquivo recebe SHA-256 e validação ZIP, e a versão do pacote é registrada.
-- Identifica heurísticas de Unity, Unreal e bibliotecas ARM64, sem prometer que um jogo usa Vulkan ou que será compatível com um runtime.
-- O usuário pode remover só as cópias privadas. Isso não modifica, reinstala nem lê os dados privados do aplicativo original.
-- A demonstração Vulkan própria é executada no processo secundário :virtualgfx, sob controle do FrameRoom; não corresponde à execução de um APK de terceiros.
-- Preserva a importação da Lossless.dll, testes Bloodframe 2x, Vulkan/AHB e a UI atual.
+## Para testar a execução
 
-## Limites
-Copiar um APK não é clonar a instalação: não copia contas, dados, OBB, Play Asset Delivery ou serviços. O arquivo copiado não é executado. Jogos que dependem de Play Integrity, DRM, Google Play Services ou anticheat podem ser incompatíveis com virtualizadores.
-Sem root, camadas Vulkan externas não podem ser injetadas universalmente em jogos Android não depuráveis. O único caminho potencial é um runtime que efetivamente hospede o jogo no processo controlado e permita fornecer quadros ao motor LSFG. Isso precisa ser demonstrado em jogo de teste.
+1. No GitHub Actions, baixe **do mesmo build** o APK `FrameRoom-r0.8-debug-apk` e o `FrameRoom-r0.8-cooperative-demo-apk`.
+2. Instale **ambos**. Se a instalação do FrameRoom falhar por assinatura, desinstale a versão debug anterior antes. Isso remove os dados do FrameRoom, incluindo DLL e snapshots, então guarde seus próprios arquivos antes.
+3. Abra FrameRoom → Adicionar aplicativo → **FrameRoom Test Game**.
+4. Toque **Preparar cópia dos APKs deste jogo** para criar e validar uma cópia privada.
+5. Após a preparação, toque **Executar cópia do JOGO DE TESTE dentro do FrameRoom**.
+6. O jogo de teste executará seu código de APK (Canvas) no processo secundário `:virtualgame`, sem abrir a `SampleActivity` original. A tela responde ao toque.
 
-## Próximas etapas técnicas
-1. Integrar um runtime Android comprovado, começando por APKs de teste sem DRM, como VirtualApp (Apache-2.0), com as adaptações e testes necessários ao Android 16.
-2. Validar execução independente e permissões, lifecycle, input, áudio e Vulkan.
-3. Expor as imagens da renderização do clone ao Bloodframe com buffers AHardwareBuffer e sincronização correta.
-4. Mostrar quadros realmente gerados e medir FPS original/apresentado e latência na Adreno 710.
+O mesmo aplicativo de demonstração também pode ser aberto normalmente fora do FrameRoom para comparação. A classe é carregada de forma dinâmica de um APK privado, não da Activity original.
 
-Fontes: https://github.com/ISEKHON/VirtualApp e https://github.com/ducvd89/bloodframe.
-Esta R0.7 é experimental; o APK será distribuído somente quando o workflow de compilação passar.
+## Propriedades e limites
+
+- **Funcional de propósito restrito**: apenas o pacote `dev.frameroom.samplegame`, criado e assinado com o mesmo certificado do host, oferecendo um ponto de entrada cooperativo `createView(Context)`.
+- O host valida assinatura, integridade SHA-256, correspondência com o APK instalado e somente carrega arquivos somente leitura (Android 14+).
+- O processo `:virtualgame` é separado, mas compartilha o mesmo UID Android do FrameRoom. Não é sandbox endurecida nem isolador de aplicativos não confiáveis.
+- Não reproduz Activities, Services, ContentProviders, PackageManager, Google Play Services, recursos externos nem bibliotecas nativas arbitrárias de um jogo de terceiros. Jogos comerciais **não são compatíveis** com este protocolo.
+- **O jogo de teste usa Canvas.** Ele não rende por Vulkan nem usa Bloodframe. Os experimentos Vulkan/LSFG continuam disponíveis em outras telas, mas ainda não estão conectados a um jogo virtualizado.
+- O app não concede permissões extras nem tenta contornar DRM, Play Integrity ou anticheat.
+
+## Para atingir seu objetivo de verdade
+
+O próximo marco é substituir o protocolo cooperativo por um runtime real capaz de hospedar Activities e bibliotecas nativas de um jogo compatível, com estado separado. Só depois o runtime precisa entregar seus buffers de Vulkan ao motor Bloodframe, apresentar os frames gerados e medir latência. A compatibilidade com jogos proprietários continua **não comprovada**, especialmente Android 16.
+
+Referências de restrições: https://developer.android.com/about/versions/14/behavior-changes-14 e https://developer.android.com/privacy-and-security/security-tips
+
+Código base das fases anteriores preservado. Consulte também `docs/R08-COOPERATIVE-RUNTIME.md`.

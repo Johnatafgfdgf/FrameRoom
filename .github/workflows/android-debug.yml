@@ -65,18 +65,26 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee build.log
+          gradle --no-daemon :app:assembleDebug :samplegame:assembleDebug --stacktrace 2>&1 | tee build.log
       - name: Enviar build.log mesmo se falhar
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.7-build-log
+          name: FrameRoom-r0.8-build-log
           path: build.log
           if-no-files-found: ignore
       - name: Enviar APK debug
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.7-debug-apk
+          name: FrameRoom-r0.8-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Enviar APK do jogo de teste assinado junto com FrameRoom
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrameRoom-r0.8-cooperative-demo-apk
+          path: samplegame/build/outputs/apk/debug/samplegame-debug.apk
           if-no-files-found: error
