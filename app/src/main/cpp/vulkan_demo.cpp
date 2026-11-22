@@ -555,12 +555,10 @@ struct Metrics {
     uint64_t originals = 0, sent = 0, sentGenerated = 0, shown = 0, shownGenerated = 0, omitted = 0;
     uint64_t waitSamples = 0, latencySamples = 0, displaySamples = 0, lastDisplayNs = 0;
     double batchMs = 0, latencyMs = 0, displayMs = 0;
-    bool everShownGenerated = false;
     void record(const std::vector<PresentedFrame>& observed) {
         for (const auto& frame : observed) {
             ++shown;
             shownGenerated += frame.generated;
-            everShownGenerated |= frame.generated;
             if (frame.sampleNs && frame.presentedNs >= frame.sampleNs) {
                 latencyMs += (frame.presentedNs - frame.sampleNs) / 1e6;
                 ++latencySamples;
@@ -583,11 +581,11 @@ struct Metrics {
         if (waitSamples) out << "\nLSFG " << batchMs / waitSamples << " ms por lote (inclui espera)";
         if (latencySamples) out << "\nCena → exibição " << latencyMs / latencySamples << " ms";
         if (omitted) out << "\nFG descartados: " << omitted;
-        const bool seen = everShownGenerated;
         const uint64_t previousDisplay = lastDisplayNs;
+        const uint64_t totalOmitted = omitted;
         *this = {};
-        everShownGenerated = seen;
         lastDisplayNs = previousDisplay;
+        omitted = totalOmitted;
         return out.str();
     }
 };
@@ -686,7 +684,6 @@ struct Runner {
         uint32_t age = 0;
         uint32_t validationAttempts = 0;
         bool verified = false;
-        bool generatedSent = false;
         const auto period = Ns(1'000'000'000 / targetFps);
         auto next = Clock::now();
         auto measure = next;
@@ -699,7 +696,6 @@ struct Runner {
             if (renderer.sent) {
                 ++metrics.sent;
                 metrics.sentGenerated += generated;
-                generatedSent |= generated;
             } else if (generated) ++metrics.omitted;
             metrics.record(renderer.collectTimings());
             return true;
@@ -711,7 +707,6 @@ struct Runner {
             // FrameGeneration owns the same queue, which is drained at teardown.
             fg.reset();
             verified = false;
-            generatedSent = false;
             const std::string header = detail.substr(0, detail.find('\n'));
             setStatus("FG indisponível\n" + header, detail);
             __android_log_print(ANDROID_LOG_WARN, "FrameRoomFG", "%s", detail.c_str());
@@ -720,8 +715,7 @@ struct Runner {
             const bool requested = live && fgRequested.load();
             if (!requested && (fg || failed)) {
                 fg.reset();
-                failed = verified = generatedSent = false;
-                metrics.everShownGenerated = false;
+                failed = verified = false;
                 renderer.forgetTimings();
                 age = validationAttempts = 0;
                 detail.clear();
@@ -806,9 +800,9 @@ struct Runner {
                 std::string state;
                 if (failed) state = "FG indisponível · Vulkan direto";
                 else if (!fg) state = live ? "FG desligado" : (ahbMode ? "Vulkan AHB duplo" : "Vulkan direto");
-                else if (metrics.everShownGenerated) state = "FG 2× confirmado pela tela";
-                else if (generatedSent) state = "FG 2× enviado à tela";
-                else if (verified) state = "Imagem LSFG verificada · aguardando envio";
+                else if (metrics.shownGenerated) state = "FG 2× confirmado pela tela";
+                else if (metrics.sentGenerated) state = "FG 2× enviado à tela";
+                else if (verified) state = "FG sem apresentação neste intervalo";
                 else state = "LSFG 2× · verificando imagem";
                 const auto rates = metrics.report(seconds, renderer.hasDisplayTiming());
                 setStatus(state + "\n" + rates, evidence + (evidence.empty() ? "" : "\n") + detail +

@@ -9,7 +9,7 @@ FrameRoom é um aplicativo Android ARM64 que executa jogos cooperativos e integr
 3. Na biblioteca, use **Adicionar aplicativo** e selecione **Arena FrameRoom**. Em **Configurar**, defina o limite original e a preferência de FG. **Jogar** prepara uma cópia local, verifica o APK e carrega a cena no processo do FrameRoom. Arraste o quadrado verde até o alvo laranja para verificar toque, áudio e progresso.
 4. **Copiar diagnóstico** inclui o caminho de transporte AHB, custos do lote, resultados da leitura de pixels e status da apresentação. A aba **Avançado** preserva os testes isolados de Vulkan, AHB e Bloodframe.
 
-O teste usa 640×360 no compositor FG, com ajuste 16:9 à superfície. O overlay exibe quadros confirmados pelo driver quando `VK_GOOGLE_display_timing` responde; em outros aparelhos, exibe envios à swapchain. A latência registrada vai da amostra da cena até o horário informado pelo driver.
+O teste usa 640×360 no compositor FG, com ajuste 16:9 à superfície. O overlay exibe quadros confirmados pelo driver quando `VK_GOOGLE_display_timing` responde. Em outros aparelhos, exibe envios à swapchain. A latência registrada vai da amostra da cena até o horário informado pelo driver.
 
 ## Compatibilidade
 

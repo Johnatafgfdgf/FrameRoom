@@ -17,5 +17,29 @@ if grep -Ei '\.dll$' <<<"$apk_files" || grep '^lib/' <<<"$apk_files" | grep -v '
     echo "APK contains an unexpected library or DLL."
     exit 1
 fi
-echo "PASS: both APK signatures match; FrameRoom contains only ARM64 native libraries and no DLL."
+"$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$apk"
+python3 - "$apk" <<'PYELF'
+from struct import unpack_from
+from sys import argv
+from zipfile import ZipFile
+
+with ZipFile(argv[1]) as apk:
+    for name in apk.namelist():
+        if not name.endswith(".so"):
+            continue
+        data = apk.read(name)
+        assert data[:6] == b"\x7fELF\x02\x01", name
+        assert unpack_from("<H", data, 18)[0] == 183, name
+        table = unpack_from("<Q", data, 32)[0]
+        entry_size, entries = unpack_from("<HH", data, 54)
+        loads = 0
+        for index in range(entries):
+            kind, _, offset, address, _, _, _, alignment = unpack_from("<IIQQQQQQ", data, table + index * entry_size)
+            if kind != 1:
+                continue
+            loads += 1
+            assert alignment >= 16384 and (offset - address) % 16384 == 0, name
+        assert loads, name
+PYELF
+echo "PASS: both APK signatures match, native libraries are ARM64 with 16 KiB alignment, and no DLL is bundled."
 sha256sum "$apk" "$arena"
