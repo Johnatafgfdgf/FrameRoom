@@ -61,7 +61,7 @@ public final class DllStore {
                     + "Tamanho: " + dll.length() / 1024 + " KiB\n"
                     + "SHA-256: " + sha + "\n"
                     + "Atenção: cabeçalho PE válido NÃO confirma que é Lossless.dll ou que possui os shaders corretos.\n"
-                    + "Motor LSFG: NÃO integrado.";
+                    + "Motor LSFG: verificar pela inicialização Bloodframe; FG de quadros ainda não implementado.";
         } catch (Exception e) { return "DLL armazenada, mas inválida: " + e.getMessage(); }
     }
 }

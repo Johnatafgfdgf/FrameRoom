@@ -1,0 +1,1 @@
+Cabeçalho `bb_lsfg.h` copiado do projeto Bloodframe, commit `f4ac713aef58d9403a136e179b3b0d163d85eb66`, sob licença MIT, preservando a atribuição e o aviso upstream: https://github.com/ducvd89/bloodframe/blob/main/LICENSE.md. Biblioteca vinculada via GitHub Actions com licenças de seus autores originais.

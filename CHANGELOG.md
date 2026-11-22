@@ -1,3 +1,9 @@
+# R0.5 — Inicialização Bloodframe LSFG em APK (diagnóstico)
+- Bibliotecas nativas Bloodframe compiladas pelo CI a partir de versão fixada.
+- JNI usa `bb_lsfg_init`, relata shaders e recursos AHB ou mensagem real de erro.
+- Interface oferece diagnóstico explícito; não afirma gerar quadros.
+- Não implementa ainda virtualização Android nem FG em aplicativos.
+
 # R0.4
 
 - Dois AHardwareBuffer importados separadamente como origens de quadros consecutivos, com alternância por frame.

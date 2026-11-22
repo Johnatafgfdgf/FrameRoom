@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         setContentView(scroll);
         heading("FrameRoom", 29, Color.WHITE);
-        info("R0.4 • Base Android e demonstração Vulkan (sem root)");
+        info("R0.5 • Base Android e demonstração Vulkan (sem root)");
         section("Aplicativos selecionados");
         info("Nesta versão são atalhos para apps externos. Ainda NÃO são clones nem executados dentro do FrameRoom.");
         button(content, "+ Adicionar aplicativo", () -> startActivity(new Intent(this, AppPickerActivity.class)));
@@ -71,7 +71,20 @@ public class MainActivity extends Activity {
                 libraryStatus.setText("Não foi possível apagar a DLL armazenada.");
             }
         });
-        info("A DLL só é verificada como PE e armazenada. Não é executada, não é extraída e não gera quadros nesta versão.");
+        info("Esta versão tenta inicializar a Bloodframe usando os shaders da DLL fornecida, mas ainda não apresenta quadros gerados.");
+        TextView engineStatus = info("Motor LSFG: diagnóstico ainda não executado.");
+        button(content, "Diagnosticar Bloodframe + DLL + Vulkan", () -> {
+            java.io.File file = DllStore.location(this);
+            if (!file.isFile()) { engineStatus.setText("Importe sua Lossless.dll primeiro."); return; }
+            engineStatus.setText("Inicializando LSFG para diagnóstico...");
+            executor.execute(() -> {
+                String answer;
+                try { answer = NativeProbe.bloodframeReport(file.getAbsolutePath()); }
+                catch (Throwable e) { answer = "Erro LSFG: " + e; }
+                final String report = answer;
+                if (!destroyed) runOnUiThread(() -> { if (!destroyed) engineStatus.setText(report); });
+            });
+        });
 
         section("Vulkan + AHardwareBuffer — Fase 2");
         button(content, "Testar Vulkan direto / AHB duplo", () ->
