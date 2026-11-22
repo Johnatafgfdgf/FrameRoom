@@ -17,8 +17,8 @@ checks = {
   'Query image format support': 'vkGetPhysicalDeviceImageFormatProperties2' in ahb,
   'Record GPU render/copy commands': all(key in ahb for key in ('vkCmdClearColorImage', 'vkCmdCopyBufferToImage', 'vkCmdCopyImage', 'vkCmdPipelineBarrier')),
   'Acquire synchronization waits for transfer': 'VK_PIPELINE_STAGE_TRANSFER_BIT :' in cpp,
-  'New APK version': 'versionName = "0.8.0"' in gradle,
-  'CI uploads apk and failure logs': 'FrameRoom-r0.8-debug-apk' in workflow and 'FrameRoom-r0.8-build-log' in workflow,
+  'New APK version': 'versionName = "0.9.0"' in gradle,
+  'CI uploads apk and failure logs': 'FrameRoom-r0.9-debug-apk' in workflow and 'FrameRoom-r0.9-build-log' in workflow,
   'AHB ring owns two source frames': 'std::array<AhbOffscreen, 2>' in cpp and 'current.record(' in cpp,
   'Export source buffer accessor': 'hardwareBuffer() const' in (r/'app/src/main/cpp/ahb_offscreen.h').read_text(),
   'Only public Android NDK link libraries': 'nativewindow' not in cmake and 'vulkan android log' in cmake,
@@ -46,6 +46,11 @@ checks = {
   'Hosted DEX code is read-only': 'setReadOnly()' in
       (r/'app/src/main/java/dev/frameroom/GamePackageSnapshot.java').read_text() and
       'DexClassLoader' in (r/'app/src/main/java/dev/frameroom/HostedGameActivity.java').read_text(),
+  'CI patches gralloc allocation check before building Bloodframe': 'tools/patch_bloodframe_ahb.py' in workflow and
+      'f4ac713aef58d9403a136e179b3b0d163d85eb66' in workflow,
+  'Native diagnostics distinguish input from output AHB': '"saída FG"' in
+      (r/'app/src/main/cpp/framegen_batch.cpp').read_text() and
+      'AHardwareBuffer_isSupported' in (r/'app/src/main/cpp/framegen_batch.cpp').read_text(),
   'No MediaProjection API': 'android.media.projection' not in java and 'createScreenCaptureIntent(' not in java and 'AMediaProjection' not in cpp,
 }
 for name, ok in checks.items():

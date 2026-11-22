@@ -46,6 +46,9 @@ jobs:
           git clone --quiet https://github.com/ducvd89/bloodframe.git "$RUNNER_TEMP/bloodframe"
           git -C "$RUNNER_TEMP/bloodframe" checkout --quiet f4ac713aef58d9403a136e179b3b0d163d85eb66
           git -C "$RUNNER_TEMP/bloodframe" submodule update --init --recursive
+          # Work around Vulkan format capability vs gralloc allocation mismatch,
+          # observed on the Adreno 710: select upstream's copy-output transport.
+          python3 tools/patch_bloodframe_ahb.py "$RUNNER_TEMP/bloodframe"
           NDK_DIR="$ANDROID_HOME/ndk/27.0.12077973"
           cmake -S "$RUNNER_TEMP/bloodframe/android" -B "$RUNNER_TEMP/bfbuild" -G Ninja \
             -DLSFG_SRC="$RUNNER_TEMP/bloodframe" \
@@ -70,14 +73,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.8-build-log
+          name: FrameRoom-r0.9-build-log
           path: build.log
           if-no-files-found: ignore
       - name: Enviar APK debug
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.8-debug-apk
+          name: FrameRoom-r0.9-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -85,6 +88,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: FrameRoom-r0.8-cooperative-demo-apk
+          name: FrameRoom-r0.9-cooperative-demo-apk
           path: samplegame/build/outputs/apk/debug/samplegame-debug.apk
           if-no-files-found: error
