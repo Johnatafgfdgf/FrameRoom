@@ -1,3 +1,11 @@
+# R0.9 — fallback AHardwareBuffer na Adreno 710
+
+- Investigação do erro de hardware `AHardwareBuffer_allocate 1` com LSFG inicializado e `ahb_transport=direct-storage`.
+- Correção da detecção de suporte no Bloodframe no build: gralloc real é testado antes de selecionar direct-storage; fallback para saída por cópia GPU.
+- Diagnóstico detalhado de entrada/saída AHB e flags.
+- CI gera APK R0.9 e aplica patch auditável ao upstream MIT.
+- Ainda não apresenta quadros LSFG nem executa jogos em um espaço paralelo universal.
+
 # R0.8 — primeiro APK cooperativo rodando dentro do FrameRoom
 - App de demonstração Android próprio compilado como segundo APK e assinado no mesmo build.
 - Um processo `:virtualgame` separado carrega bytecode do APK copiado por `DexClassLoader` após verificar certificado e SHA-256.

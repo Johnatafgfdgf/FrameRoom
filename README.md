@@ -1,31 +1,22 @@
-# FrameRoom R0.8 — APK cooperativo executado pelo FrameRoom (prova de conceito)
+# FrameRoom R0.9 — correção do AHardwareBuffer na Adreno 710
 
-**Esta R0.8 não é um Parallel Space universal.** Ela acrescenta uma demonstração verificável de execução de código de um APK independente dentro do processo do FrameRoom, sem root, por um mecanismo estritamente limitado a um APK de teste de mesma assinatura.
+**Correção baseada em evidência do aparelho:** R0.8 conseguiu inicializar Bloodframe 2.0 com uma Lossless.dll na GPU Adreno (TM) 710. Shaders selecionados: FP32 SPIR-V; `ahb_transport=direct-storage`, `input_copy=0`, `output_copy=0`, `sync_fd=1`, AHB input flags=768 e output flags=16777984. Ao tentar gerar 1 quadro, `AHardwareBuffer_allocate` retornou 1. A demonstração Vulkan direta e AHB com permissões regulares funcionou em vídeo enviado pelo usuário.
 
-## Para testar a execução
+## O que mudou
+- `tools/patch_bloodframe_ahb.py`: antes de construir Bloodframe no CI, testa a alocação REAL do AHardwareBuffer RGBA8 usando `GPU_DATA_BUFFER`, além do Vulkan format probe. Se o Android gralloc rejeitar essa combinação, desabilita apenas o transporte de saída direct-storage e faz a seleção padrão do upstream escolher `direct-input-copy-output` ou `transport-only` conforme capacidades verificadas. Não força formatos incompatíveis, nem remove flags que o backend exige.
+- `framegen_batch.cpp`: agora reporta qual buffer falhou (entrada 0/1 ou saída FG), flags exatas, `AHardwareBuffer_isSupported` e código de alocação; o resultado de sucesso discrimina `input_copy` e `output_copy`.
+- Mantém a DLL importada pelo usuário, Bytecode cooperativo de teste e snapshots APK da R0.8. Nenhuma DLL proprietária é distribuída.
 
-1. No GitHub Actions, baixe **do mesmo build** o APK `FrameRoom-r0.8-debug-apk` e o `FrameRoom-r0.8-cooperative-demo-apk`.
-2. Instale **ambos**. Se a instalação do FrameRoom falhar por assinatura, desinstale a versão debug anterior antes. Isso remove os dados do FrameRoom, incluindo DLL e snapshots, então guarde seus próprios arquivos antes.
-3. Abra FrameRoom → Adicionar aplicativo → **FrameRoom Test Game**.
-4. Toque **Preparar cópia dos APKs deste jogo** para criar e validar uma cópia privada.
-5. Após a preparação, toque **Executar cópia do JOGO DE TESTE dentro do FrameRoom**.
-6. O jogo de teste executará seu código de APK (Canvas) no processo secundário `:virtualgame`, sem abrir a `SampleActivity` original. A tela responde ao toque.
+## O que testar no POCO X6
+1. Baixe o FrameRoom r0.9 debug do GitHub Actions desta branch após build verde.
+2. A DLL já importada pode continuar válida se atualizar sobre o APK com a mesma assinatura.
+3. Toque **Diagnosticar Bloodframe + DLL + Vulkan**. O transporte esperado SE o problema for mesmo o modo direct-storage é `direct-input-copy-output`, com `output_copy=1` e usage de saída sem `GPU_DATA_BUFFER`.
+4. Toque **Teste experimental: gerar 1 quadro LSFG (sem exibição)**. O resultado será uma chamada real de `create_context/present/wait`, mas o quadro produzido ainda não é mostrado.
+5. Se falhar, anote a mensagem completa; os diagnósticos agora mostram o buffer, uso e etapa exatos.
 
-O mesmo aplicativo de demonstração também pode ser aberto normalmente fora do FrameRoom para comparação. A classe é carregada de forma dinâmica de um APK privado, não da Activity original.
+## Limitações
+- **Não executa jogos Android comerciais em sandbox e não aplica LSFG ao Sparking ZERO.** Os APKs preparados continuam arquivos inertes. O processo do jogo de teste R0.8 é um carregador cooperativo e não virtualiza apps arbitrários.
+- Mesmo sucesso do processamento sintético não prova correção visual dos quadros, FPS ou latência do jogo.
+- A seleção alternativa é um fallback seguro; pode consumir mais largura de banda da GPU e precisa de teste real.
 
-## Propriedades e limites
-
-- **Funcional de propósito restrito**: apenas o pacote `dev.frameroom.samplegame`, criado e assinado com o mesmo certificado do host, oferecendo um ponto de entrada cooperativo `createView(Context)`.
-- O host valida assinatura, integridade SHA-256, correspondência com o APK instalado e somente carrega arquivos somente leitura (Android 14+).
-- O processo `:virtualgame` é separado, mas compartilha o mesmo UID Android do FrameRoom. Não é sandbox endurecida nem isolador de aplicativos não confiáveis.
-- Não reproduz Activities, Services, ContentProviders, PackageManager, Google Play Services, recursos externos nem bibliotecas nativas arbitrárias de um jogo de terceiros. Jogos comerciais **não são compatíveis** com este protocolo.
-- **O jogo de teste usa Canvas.** Ele não rende por Vulkan nem usa Bloodframe. Os experimentos Vulkan/LSFG continuam disponíveis em outras telas, mas ainda não estão conectados a um jogo virtualizado.
-- O app não concede permissões extras nem tenta contornar DRM, Play Integrity ou anticheat.
-
-## Para atingir seu objetivo de verdade
-
-O próximo marco é substituir o protocolo cooperativo por um runtime real capaz de hospedar Activities e bibliotecas nativas de um jogo compatível, com estado separado. Só depois o runtime precisa entregar seus buffers de Vulkan ao motor Bloodframe, apresentar os frames gerados e medir latência. A compatibilidade com jogos proprietários continua **não comprovada**, especialmente Android 16.
-
-Referências de restrições: https://developer.android.com/about/versions/14/behavior-changes-14 e https://developer.android.com/privacy-and-security/security-tips
-
-Código base das fases anteriores preservado. Consulte também `docs/R08-COOPERATIVE-RUNTIME.md`.
+Créditos à Bloodframe (MIT), commit upstream fixado `f4ac713aef58d9403a136e179b3b0d163d85eb66`. A modificação é aplicada apenas na compilação, documentada e testada contra as âncoras da versão fixada.

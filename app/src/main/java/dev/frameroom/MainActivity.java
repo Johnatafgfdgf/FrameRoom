@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         setContentView(scroll);
         heading("FrameRoom", 29, Color.WHITE);
-        info("R0.8 • Execução de APK cooperativo (teste sem root)");
+        info("R0.9 • Correção de transporte Vulkan/AHB • sem root");
         section("Aplicativos selecionados");
         info("Escolha um jogo. O FrameRoom consegue preparar uma cópia privada do APK base e dos splits, mas ainda não executa o clone. O original permanece intocado.");
         button(content, "+ Adicionar aplicativo", () -> startActivity(new Intent(this, AppPickerActivity.class)));
@@ -71,7 +71,7 @@ public class MainActivity extends Activity {
                 libraryStatus.setText("Não foi possível apagar a DLL armazenada.");
             }
         });
-        info("Esta versão tenta inicializar a Bloodframe usando os shaders da DLL fornecida, mas ainda não apresenta quadros gerados.");
+        info("Esta versão inicializa o motor Bloodframe e testa um quadro sintético. A R0.9 detecta falha do gralloc em AHB direct-storage e tenta o transporte alternativo por cópia GPU. Ainda não apresenta FPS gerados em jogos.");
         TextView engineStatus = info("Motor LSFG: diagnóstico ainda não executado.");
         button(content, "Diagnosticar Bloodframe + DLL + Vulkan", () -> {
             java.io.File file = DllStore.location(this);

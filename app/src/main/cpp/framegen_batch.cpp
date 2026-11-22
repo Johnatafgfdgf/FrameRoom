@@ -25,13 +25,26 @@ using Destroy=decltype(&bb_lsfg_destroy_context);
 struct Buffer {
     AHardwareBuffer* value=nullptr;
     ~Buffer(){if(value)AHardwareBuffer_release(value);}
-    bool allocate(uint64_t flags,std::string& err) {
+    bool allocate(uint64_t flags,std::string& err,const char* label) {
         AHardwareBuffer_Desc d{};
         d.width=WIDTH;d.height=HEIGHT;d.layers=1;
         d.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
         d.usage=flags;
+        // 1) Android gralloc support may contradict the Vulkan format probe.
+        // 2) Report the input/output role and exact usage bits on failure.
+        int supported=AHardwareBuffer_isSupported(&d);
+        if(supported==0) {
+            err=std::string(label)+": gralloc rejeita formato RGBA8 640x360 com usage="+
+                std::to_string(flags)+" (AHardwareBuffer_isSupported=0)";
+            return false;
+        }
         int rc=AHardwareBuffer_allocate(&d,&value);
-        if(rc!=0||!value){err="AHardwareBuffer_allocate falhou: "+std::to_string(rc);return false;}
+        if(rc!=0||!value){
+            err=std::string(label)+": AHardwareBuffer_allocate falhou: rc="+
+                std::to_string(rc)+" usage="+std::to_string(flags)+
+                " (isSupported="+std::to_string(supported)+")";
+            return false;
+        }
         return true;
     }
 };
@@ -233,8 +246,8 @@ std::string run(const std::string& dll){
         Buffer in0,in1,out;
         const uint64_t inFlags=info.input_ahb_usage|AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
         const uint64_t outFlags=info.output_ahb_usage;
-        if(!in0.allocate(inFlags,err)||!in1.allocate(inFlags,err)||
-           !out.allocate(outFlags,err))summary="Alocação AHB: "+err;
+        if(!in0.allocate(inFlags,err,"entrada 0")||!in1.allocate(inFlags,err,"entrada 1")||
+           !out.allocate(outFlags,err,"saída FG"))summary="Alocação AHB: "+err;
         else if(!fill(vk,in0.value,0.15f,0.55f,err)||
                 !fill(vk,in1.value,0.65f,0.15f,err))
             summary="Não foi possível escrever frames pela GPU: "+err;
@@ -261,7 +274,9 @@ std::string run(const std::string& dll){
                 if(a==0&&b==0&&completed==0)
                     summary="Bloodframe retornou SUCESSO ao gerar 1 quadro 2× usando "
                         "duas imagens Vulkan AHB 640×360. A saída ainda NÃO foi "
-                        "lida nem exibida: qualidade e latência não verificadas.";
+                        "lida nem exibida: qualidade e latência não verificadas. " +
+                        std::string("AHB input_copy=")+(info.input_copy?"1":"0")+
+                        " output_copy="+(info.output_copy?"1":"0");
                 else summary=std::string("Falha no lote LSFG (prime=")+std::to_string(a)+
                     ", present="+std::to_string(b)+", wait="+
                     std::to_string(completed)+"): "+msg;
