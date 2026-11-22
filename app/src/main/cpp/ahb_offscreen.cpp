@@ -96,9 +96,8 @@ bool AhbOffscreen::create(VkPhysicalDevice physical, VkDevice device,
     result = vkCreateImage(device, &info, nullptr, &image_);
     if (result != VK_SUCCESS) { error = fail("vkCreateImage (AHB)", result); destroy(device); return false; }
 
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(device, image_, &requirements);
-    uint32_t memoryTypes = ahbProperties.memoryTypeBits & requirements.memoryTypeBits;
+    // AHB images cannot be queried with vkGetImageMemoryRequirements before binding.
+    uint32_t memoryTypes = ahbProperties.memoryTypeBits;
     if (!memoryTypes) {
         error = "Nenhum tipo de memória Vulkan compatível com o AHB.";
         destroy(device);

@@ -33,11 +33,6 @@ struct Buffer {
         // 1) Android gralloc support may contradict the Vulkan format probe.
         // 2) Report the input/output role and exact usage bits on failure.
         int supported=AHardwareBuffer_isSupported(&d);
-        if(supported==0) {
-            err=std::string(label)+": gralloc rejeita formato RGBA8 640x360 com usage="+
-                std::to_string(flags)+" (AHardwareBuffer_isSupported=0)";
-            return false;
-        }
         int rc=AHardwareBuffer_allocate(&d,&value);
         if(rc!=0||!value){
             err=std::string(label)+": AHardwareBuffer_allocate falhou: rc="+
@@ -78,10 +73,13 @@ struct Vulkan {
             if(vkEnumerateDeviceExtensionProperties(gpu,nullptr,&extCount,nullptr)!=VK_SUCCESS)continue;
             std::vector<VkExtensionProperties> extensions(extCount);
             if(vkEnumerateDeviceExtensionProperties(gpu,nullptr,&extCount,extensions.data())!=VK_SUCCESS)continue;
-            bool ahb=false;
-            for(const auto& e:extensions)if(std::strcmp(e.extensionName,
-                VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)==0){ahb=true;break;}
-            if(!ahb)continue;
+            auto hasExtension = [&](const char* name) {
+                return std::any_of(extensions.begin(), extensions.end(), [&](const auto& extension) {
+                    return std::strcmp(extension.extensionName, name) == 0;
+                });
+            };
+            if (!hasExtension(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) ||
+                !hasExtension(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME)) continue;
             uint32_t qCount=0;vkGetPhysicalDeviceQueueFamilyProperties(gpu,&qCount,nullptr);
             std::vector<VkQueueFamilyProperties> qs(qCount);
             vkGetPhysicalDeviceQueueFamilyProperties(gpu,&qCount,qs.data());
@@ -94,10 +92,11 @@ struct Vulkan {
         float priority=1.0f;
         VkDeviceQueueCreateInfo qi{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         qi.queueFamilyIndex=family;qi.queueCount=1;qi.pQueuePriorities=&priority;
-        const char* ext=VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
+        const char* extensions[] = {VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+                                    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME};
         VkDeviceCreateInfo dc{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         dc.queueCreateInfoCount=1;dc.pQueueCreateInfos=&qi;
-        dc.enabledExtensionCount=1;dc.ppEnabledExtensionNames=&ext;
+        dc.enabledExtensionCount=2;dc.ppEnabledExtensionNames=extensions;
         rc=vkCreateDevice(physical,&dc,nullptr,&device);
         if(rc!=VK_SUCCESS){err="vkCreateDevice (AHB): "+std::to_string(rc);return false;}
         vkGetDeviceQueue(device,family,0,&queue);
@@ -140,11 +139,10 @@ bool fill(Vulkan& vk, AHardwareBuffer* ahb, float red, float blue, std::string& 
     imageInfo.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
     rc=vkCreateImage(vk.device,&imageInfo,nullptr,&image);
     if(rc!=VK_SUCCESS){err="Importação VkImage: "+std::to_string(rc);clean();return false;}
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(vk.device,image,&requirements);
+    // Dedicated AHB imports take size and memory types from the buffer itself.
     VkPhysicalDeviceMemoryProperties mp{};
     vkGetPhysicalDeviceMemoryProperties(vk.physical,&mp);
-    uint32_t mask=requirements.memoryTypeBits & props.memoryTypeBits;
+    uint32_t mask=props.memoryTypeBits;
     uint32_t type=UINT32_MAX;
     for(uint32_t i=0;i<mp.memoryTypeCount;++i)
         if(mask&(1u<<i)){type=i;if(mp.memoryTypes[i].propertyFlags&VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)break;}
