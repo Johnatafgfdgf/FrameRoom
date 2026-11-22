@@ -43,9 +43,9 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         setContentView(scroll);
         heading("FrameRoom", 29, Color.WHITE);
-        info("R0.6 • Base Android e demonstração Vulkan (sem root)");
+        info("R0.7 • Preparação de APKs para futuro espaço paralelo");
         section("Aplicativos selecionados");
-        info("Nesta versão são atalhos para apps externos. Ainda NÃO são clones nem executados dentro do FrameRoom.");
+        info("Escolha um jogo. O FrameRoom consegue preparar uma cópia privada do APK base e dos splits, mas ainda não executa o clone. O original permanece intocado.");
         button(content, "+ Adicionar aplicativo", () -> startActivity(new Intent(this, AppPickerActivity.class)));
         appList = new LinearLayout(this);
         appList.setOrientation(LinearLayout.VERTICAL);
@@ -99,6 +99,8 @@ public class MainActivity extends Activity {
                 if (!destroyed) runOnUiThread(() -> { if (!destroyed) batchStatus.setText(report); });
             });
         });
+        section("Processo gráfico separado — prova de conceito");
+        info("O renderizador Vulkan agora usa um processo :virtualgfx, separado da interface. Ele só renderiza nossa cena de teste: não executa jogos clonados.");
         section("Vulkan + AHardwareBuffer — Fase 2");
         button(content, "Testar Vulkan direto / AHB duplo", () ->
                 startActivity(new Intent(this, VulkanDemoActivity.class)));
@@ -140,7 +142,9 @@ public class MainActivity extends Activity {
             title.setTextColor(Color.WHITE);
             title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             group.addView(title);
-            TextView sub = text(pkg + "\nFG: indisponível • Espaço paralelo: indisponível");
+            GamePackageSnapshot.Snapshot current = GamePackageSnapshot.latest(this, pkg);
+            TextView sub = text(pkg + "\nExecução em espaço paralelo: AINDA NÃO DISPONÍVEL." +
+                    (current == null ? "\nAPKs ainda não preparados." : "\n" + current.report()));
             group.addView(sub);
             button(group, "Abrir fora do FrameRoom (sem FG)", () -> {
                 try {
@@ -151,7 +155,26 @@ public class MainActivity extends Activity {
                     android.widget.Toast.makeText(this, "Falha: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
                 }
             });
-            button(group, "Remover atalho", () -> { AppLibrary.remove(this, pkg); refreshApps(); });
+            button(group, "Preparar cópia dos APKs deste jogo (sem executar)", () -> {
+                sub.setText("Preparando arquivos APK instalados... Pode ocupar espaço no celular.");
+                executor.execute(() -> {
+                    String message;
+                    try { message = GamePackageSnapshot.prepare(getApplicationContext(), pkg).report(); }
+                    catch (Exception error) { message = "Falha ao copiar APK: " + error.getMessage(); }
+                    final String report = message;
+                    if (!destroyed) runOnUiThread(() -> { if (!destroyed) sub.setText(pkg + "\n" + report); });
+                });
+            });
+            if (current != null) button(group, "Apagar cópias locais deste jogo", () ->
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle("Apagar APKs copiados?")
+                    .setMessage("Só apaga as cópias do FrameRoom. O jogo original e seus dados permanecem intocados.")
+                    .setNegativeButton("Cancelar", null)
+                    .setPositiveButton("Apagar", (dialog, which) -> {
+                        GamePackageSnapshot.remove(this, pkg);
+                        refreshApps();
+                    }).show());
+            button(group, "Remover da lista", () -> { AppLibrary.remove(this, pkg); refreshApps(); });
         }
     }
     private String label(PackageManager pm, String pkg) {

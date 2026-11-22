@@ -1,26 +1,23 @@
-# FrameRoom R0.6 — lote experimental LSFG 2× em Vulkan/AHB
+# FrameRoom R0.7 — APK snapshots + processo gráfico separado
 
-**Estado:** a R0.5 compilou com sucesso no GitHub Actions; a R0.6 adiciona um teste que passa de inicialização a **chamar o motor real de Frame Generation** (`bb_lsfg_create_context`, `bb_lsfg_present`, `bb_lsfg_wait`) com dois quadros sintéticos criados pela GPU Vulkan. **Não exibe o quadro interpolado e não executa jogos num espaço paralelo.** Nenhuma alegação de FPS extra em aplicativos.
+**NÃO executa clones de jogos ainda.** A meta continua sendo um espaço paralelo rootless que controle o pipeline Vulkan do aplicativo e aplique Bloodframe com a DLL do usuário.
 
-## O que foi criado
+## O que a R0.7 acrescenta
+- A partir de um jogo instalado e visível ao Android, o FrameRoom tenta copiar o APK base e todos os APKs split para seu armazenamento privado. Cada arquivo recebe SHA-256 e validação ZIP, e a versão do pacote é registrada.
+- Identifica heurísticas de Unity, Unreal e bibliotecas ARM64, sem prometer que um jogo usa Vulkan ou que será compatível com um runtime.
+- O usuário pode remover só as cópias privadas. Isso não modifica, reinstala nem lê os dados privados do aplicativo original.
+- A demonstração Vulkan própria é executada no processo secundário :virtualgfx, sob controle do FrameRoom; não corresponde à execução de um APK de terceiros.
+- Preserva a importação da Lossless.dll, testes Bloodframe 2x, Vulkan/AHB e a UI atual.
 
-- `framegen_batch.cpp`: renderizador Vulkan headless (640×360), duas imagens AHardwareBuffer independentes, conteúdo sintético GPU, output AHardwareBuffer, chamada Bloodframe real e espera pela conclusão do lote.
-- JNI `NativeProbe.frameGenBatchReport` e botão na interface, com diagnóstico distinto para inicialização, importação Vulkan, buffer, contexto e processamento.
-- Preserva o demo Vulkan, a seleção de atalhos e a importação privada da `Lossless.dll`.
-- GitHub Actions continua construindo `libbloodframe.so` a partir de fonte MIT com hash fixo. A DLL não é distribuída.
+## Limites
+Copiar um APK não é clonar a instalação: não copia contas, dados, OBB, Play Asset Delivery ou serviços. O arquivo copiado não é executado. Jogos que dependem de Play Integrity, DRM, Google Play Services ou anticheat podem ser incompatíveis com virtualizadores.
+Sem root, camadas Vulkan externas não podem ser injetadas universalmente em jogos Android não depuráveis. O único caminho potencial é um runtime que efetivamente hospede o jogo no processo controlado e permita fornecer quadros ao motor LSFG. Isso precisa ser demonstrado em jogo de teste.
 
-## Testes e limites
+## Próximas etapas técnicas
+1. Integrar um runtime Android comprovado, começando por APKs de teste sem DRM, como VirtualApp (Apache-2.0), com as adaptações e testes necessários ao Android 16.
+2. Validar execução independente e permissões, lifecycle, input, áudio e Vulkan.
+3. Expor as imagens da renderização do clone ao Bloodframe com buffers AHardwareBuffer e sincronização correta.
+4. Mostrar quadros realmente gerados e medir FPS original/apresentado e latência na Adreno 710.
 
-1. Compilar APK R0.6 na aba Actions e instalar no POCO X6 5G.
-2. Importar uma DLL legítima do Lossless Scaling.
-3. Tocar em **Diagnosticar Bloodframe + DLL + Vulkan** para checar shaders/driver.
-4. Tocar em **Teste experimental: gerar 1 quadro LSFG (sem exibição)**. O retorno comprova somente que o pipeline retornou sucesso ao processar o lote. **Não demonstra imagem visível correta, ausência de artefatos ou desempenho**.
-5. Não existe ainda reaproveitamento da saída para apresentação na tela, pacing 2× ou suporte a aplicativos de terceiros sem root.
-
-### Sobre o espaço paralelo
-
-O Android não permite injeção geral em aplicativos não depuráveis sem autorização; os atalhos atuais não são uma VM. A próxima fase deve usar um aplicativo renderizador cooperante ou uma sandbox realmente comprovada, não prometer universalidade.
-
-### Licenças
-
-Bloodframe 2.0 e dependências seguem seus termos (MIT, com notices upstream). Os shaders do LSFG não estão no APK; o usuário importa a própria Lossless.dll.
+Fontes: https://github.com/ISEKHON/VirtualApp e https://github.com/ducvd89/bloodframe.
+Esta R0.7 é experimental; o APK será distribuído somente quando o workflow de compilação passar.
