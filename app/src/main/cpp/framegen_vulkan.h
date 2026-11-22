@@ -6,10 +6,10 @@
 
 class FrameGeneration final {
 public:
-    static constexpr VkExtent2D extent{640, 360};
     static constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 
-    FrameGeneration(VkPhysicalDevice physical, VkDevice device, VkQueue queue, uint32_t family);
+    FrameGeneration(VkPhysicalDevice physical, VkDevice device, VkQueue queue, uint32_t family,
+                    VkExtent2D extent);
     ~FrameGeneration();
     FrameGeneration(const FrameGeneration&) = delete;
     FrameGeneration& operator=(const FrameGeneration&) = delete;
@@ -23,6 +23,7 @@ public:
 
     VkImage original(uint32_t index) const { return inputs.at(index).image; }
     VkImage generated() const { return output.image; }
+    VkExtent2D dimensions() const { return extent; }
     void acquireRead(VkCommandBuffer cmd, VkImage image) const;
     void releaseRead(VkCommandBuffer cmd, VkImage image) const;
 
@@ -47,6 +48,8 @@ private:
     VkDevice device;
     VkQueue queue;
     uint32_t family;
+    VkExtent2D extent;
+    VkDeviceSize pixels, imageBytes;
     Api* api = nullptr;
     bool initialized = false;
     bool lost = false;

@@ -10,8 +10,6 @@
 
 namespace {
 constexpr uint64_t gpuTimeoutNs = 500'000'000;
-constexpr VkDeviceSize pixels = FrameGeneration::extent.width * FrameGeneration::extent.height;
-constexpr VkDeviceSize imageBytes = pixels * 4;
 constexpr VkImageSubresourceRange colorRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
 void barrier(VkCommandBuffer command, VkImage image, VkImageLayout oldLayout,
@@ -42,6 +40,8 @@ struct FrameGeneration::Api {
     // Bloodframe may retain device objects after a bounded teardown timeout.
     // Keep its code mapped for the render process lifetime.
     void* module = dlopen("libbloodframe.so", RTLD_NOW | RTLD_LOCAL);
+    using SetExtent = void (*)(uint32_t, uint32_t);
+    SetExtent setExtent = load<SetExtent>("bb_lsfg_frameroom_probe_extent");
     decltype(&bb_lsfg_init) init = load<decltype(init)>("bb_lsfg_init");
     decltype(&bb_lsfg_create_context) create = load<decltype(create)>("bb_lsfg_create_context");
     decltype(&bb_lsfg_present) present = load<decltype(present)>("bb_lsfg_present");
@@ -56,8 +56,10 @@ struct FrameGeneration::Api {
     bool ready() const { return init && create && present && wait && destroy && shutdown; }
 };
 
-FrameGeneration::FrameGeneration(VkPhysicalDevice physical, VkDevice device, VkQueue queue, uint32_t family)
-    : physical(physical), device(device), queue(queue), family(family) {}
+FrameGeneration::FrameGeneration(VkPhysicalDevice physical, VkDevice device, VkQueue queue,
+                                 uint32_t family, VkExtent2D extent)
+    : physical(physical), device(device), queue(queue), family(family), extent(extent),
+      pixels(VkDeviceSize(extent.width) * extent.height), imageBytes(pixels * 4) {}
 
 FrameGeneration::~FrameGeneration() {
     if (submitted || context >= 0) vkQueueWaitIdle(queue);
@@ -149,7 +151,8 @@ bool FrameGeneration::createImage(SharedImage& target, bool isOutput, uint64_t u
     desc.usage = usage;
     const int allocation = AHardwareBuffer_allocate(&desc, &target.buffer);
     if (allocation != 0 || !target.buffer) {
-        error = std::string("Alocação AHB ") + role + " 640×360: rc=" + std::to_string(allocation) +
+        error = std::string("Alocação AHB ") + role + " " + std::to_string(extent.width) + "×" +
+            std::to_string(extent.height) + ": rc=" + std::to_string(allocation) +
             " usage=" + std::to_string(usage) + " isSupported=" + std::to_string(AHardwareBuffer_isSupported(&desc));
         return false;
     }
@@ -244,6 +247,7 @@ bool FrameGeneration::start(const std::string& dll, std::string& error) {
     // FP32 is the tested initialization path on the user's Adreno.
     BbLsfgInfo transport{};
     char message[1024]{};
+    if (api->setExtent) api->setExtent(extent.width, extent.height);
     if (api->init(&config, &transport, message, sizeof(message)) != 0) {
         error = std::string("Inicialização LSFG: ") + message;
         return false;
@@ -284,7 +288,8 @@ bool FrameGeneration::start(const std::string& dll, std::string& error) {
         return false;
     }
     if (api->diagnostics) api->diagnostics(message, sizeof(message));
-    description = std::string(message) + " | usage in=" + std::to_string(transport.input_ahb_usage) +
+    description = std::to_string(extent.width) + "×" + std::to_string(extent.height) +
+        " | " + message + " | usage in=" + std::to_string(transport.input_ahb_usage) +
         " out=" + std::to_string(transport.output_ahb_usage);
     __android_log_print(ANDROID_LOG_INFO, "FrameRoomFG", "%s", description.c_str());
     return true;
@@ -414,7 +419,8 @@ bool FrameGeneration::verify(uint32_t current, bool& usable, std::string& diagno
     const FrameEvidence evidence = inspectFrames(bytes, bytes + imageBytes, bytes + 2 * imageBytes, pixels);
     vkUnmapMemory(device, readbackMemory);
     usable = evidence.usable(pixels);
-    diagnostic = "640×360 | movimento A/B=" + std::to_string(evidence.changedInput) +
+    diagnostic = std::to_string(extent.width) + "×" + std::to_string(extent.height) +
+        " | movimento A/B=" + std::to_string(evidence.changedInput) +
         " ΔA=" + std::to_string(evidence.differsFromA) + " ΔB=" + std::to_string(evidence.differsFromB) +
         " contraste=" + std::to_string(evidence.contrast) + " sentinela=" + std::to_string(evidence.unwritten);
     __android_log_print(ANDROID_LOG_INFO, "FrameRoomFG", "pixels %s: %s",

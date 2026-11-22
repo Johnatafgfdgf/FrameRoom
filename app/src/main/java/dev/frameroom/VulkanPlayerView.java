@@ -27,6 +27,7 @@ final class VulkanPlayerView extends LinearLayout implements SurfaceHolder.Callb
                                           String dllPath, boolean fg, GameScene scene);
     private static native void nativeStop(long id);
     private static native void nativeSetFrameGeneration(long id, boolean enabled);
+    private static native void nativeSetRefreshRate(long id, int milliHz);
     private static native String nativeStatus(long id, boolean detailed);
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -40,11 +41,13 @@ final class VulkanPlayerView extends LinearLayout implements SurfaceHolder.Callb
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
             if (!resumed) return;
+            reportDisplayRefresh();
             status.setText(nativeStatus(session, false));
             handler.postDelayed(this, 450);
         }
     };
     private long session;
+    private int lastRefreshMilliHz;
     private int fps;
     private boolean resumed;
     private boolean live = true;
@@ -169,9 +172,18 @@ final class VulkanPlayerView extends LinearLayout implements SurfaceHolder.Callb
         if (!surface.isValid() || Build.VERSION.SDK_INT < 30) return;
         float rate = (fg && live) ? Math.min(fps * 2f, 120) : fps;
         try {
-            surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+            surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
         } catch (IllegalArgumentException | IllegalStateException ignored) {}
     }
+    private void reportDisplayRefresh() {
+        if (session == 0 || viewport.getDisplay() == null) return;
+        int milliHz = Math.round(viewport.getDisplay().getRefreshRate() * 1000);
+        if (milliHz != lastRefreshMilliHz) {
+            lastRefreshMilliHz = milliHz;
+            nativeSetRefreshRate(session, milliHz);
+        }
+    }
+
     private void restart() {
         stopSurface();
         if (!resumed || !surfaceReady) return;
@@ -179,6 +191,8 @@ final class VulkanPlayerView extends LinearLayout implements SurfaceHolder.Callb
         if (surface.isValid()) {
             setSurfaceRate();
             session = nativeStart(surface, fps, ahb, live, dllPath, fg, scene);
+            lastRefreshMilliHz = 0;
+            reportDisplayRefresh();
         }
     }
     private void stopSurface() {

@@ -8,16 +8,32 @@ PIN = "f4ac713aef58d9403a136e179b3b0d163d85eb66"
 DEVICE = Path("framegen/src/core/device.cpp")
 CONTEXTS = [Path(f"framegen/{v}_src/context.cpp") for v in ("v3.1", "v3.1p")]
 
+TARGET = """using namespace LSFG::Core;"""
+TARGET_SETUP = """
+#ifdef __ANDROID__
+namespace {
+thread_local uint32_t frameRoomWidth = 640;
+thread_local uint32_t frameRoomHeight = 360;
+}
+
+// The legacy batch diagnostic keeps 640x360. An active render session asks
+// the gralloc probe to check the exact RGBA8 dimensions it will allocate.
+extern "C" __attribute__((visibility("default")))
+void bb_lsfg_frameroom_probe_extent(uint32_t width, uint32_t height) {
+    frameRoomWidth = width ? width : 640;
+    frameRoomHeight = height ? height : 360;
+}
+#endif
+"""
 PROBE = """bool probeAhbImageUsage(VkPhysicalDevice physicalDevice, VkFormat format,"""
 ALLOCATOR = """#ifdef __ANDROID__
-// FrameRoom uses SDR RGBA8 at 640x360, independent of the swapchain extent.
-// Keep this first allocation probe in sync with the demo/batch's buffer contract.
+// FrameRoom shares SDR RGBA8 buffers independent of the swapchain extent.
 bool probeFrameRoomAllocation(VkFormat format, uint64_t usage, const char* role) {
     if (format != VK_FORMAT_R8G8B8A8_UNORM)
         return true;
     AHardwareBuffer_Desc desc{};
-    desc.width = 640;
-    desc.height = 360;
+    desc.width = frameRoomWidth;
+    desc.height = frameRoomHeight;
     desc.layers = 1;
     desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
     desc.usage = usage;
@@ -27,7 +43,8 @@ bool probeFrameRoomAllocation(VkFormat format, uint64_t usage, const char* role)
     const bool allocated = result == 0 && buffer != nullptr;
     if (buffer) AHardwareBuffer_release(buffer);
     if (!allocated)
-        std::cerr << "Bloodframe gralloc: " << role << " RGBA8 640x360 usage=" << usage
+        std::cerr << "Bloodframe gralloc: " << role << " RGBA8 " << desc.width << 'x' << desc.height
+                  << " usage=" << usage
                   << " isSupported=" << supported << " allocate=" << result << '\\n';
     return allocated;
 }
@@ -69,6 +86,7 @@ def replace_once(source: str, anchor: str, update: str) -> str:
 def patch_device(source: str) -> str:
     source = replace_once(source, "#include <volk.h>",
                           "#include <volk.h>\n#ifdef __ANDROID__\n#include <android/hardware_buffer.h>\n#endif")
+    source = replace_once(source, TARGET, TARGET + "\n" + TARGET_SETUP)
     source = replace_once(source, PROBE, ALLOCATOR + PROBE)
     source = replace_once(source, USAGES, NEGOTIATE)
     return replace_once(source, EXTENSION, EXTENSION + """
@@ -98,9 +116,11 @@ def patch_context(source: str) -> str:
 
 
 def self_test() -> None:
-    device = "\n".join(("#include <volk.h>", PROBE, USAGES, EXTENSION))
+    device = "\n".join(("#include <volk.h>", TARGET, PROBE, USAGES, EXTENSION))
     updated = patch_device(device)
     assert "AHardwareBuffer_allocate(&desc, &buffer)" in updated
+    assert "desc.width = frameRoomWidth" in updated
+    assert "bb_lsfg_frameroom_probe_extent" in updated
     assert "baseAllocation && probeAhbImageUsage" in updated
     assert "baseUsage | AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER" in updated
     assert "VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME" in updated

@@ -2,6 +2,7 @@
 #include <vulkan/vulkan.h>
 #include "ahb_offscreen.h"
 #include "framegen_vulkan.h"
+#include "frame_pacing.h"
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -133,9 +134,12 @@ public:
         v = vkCreateDevice(gpu, &deviceInfo, nullptr, &device);
         if (v != VK_SUCCESS) { error = vkError("vkCreateDevice", v); return false; }
         vkGetDeviceQueue(device, queueFamily, 0, &graphicsQueue);
-        if (displayTiming)
+        if (displayTiming) {
             getTimings = reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
                 vkGetDeviceProcAddr(device, "vkGetPastPresentationTimingGOOGLE"));
+            getRefreshCycle = reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(
+                vkGetDeviceProcAddr(device, "vkGetRefreshCycleDurationGOOGLE"));
+        }
         VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         poolInfo.queueFamilyIndex = queueFamily;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -144,17 +148,21 @@ public:
         VkCommandBufferAllocateInfo cmdInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         cmdInfo.commandPool = commandPool;
         cmdInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmdInfo.commandBufferCount = 1;
-        v = vkAllocateCommandBuffers(device, &cmdInfo, &commandBuffer);
+        std::array<VkCommandBuffer, 2> commands{};
+        cmdInfo.commandBufferCount = static_cast<uint32_t>(commands.size());
+        v = vkAllocateCommandBuffers(device, &cmdInfo, commands.data());
         if (v != VK_SUCCESS) { error = vkError("vkAllocateCommandBuffers", v); return false; }
-
         VkSemaphoreCreateInfo semInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        v = vkCreateSemaphore(device, &semInfo, nullptr, &imageAvailable);
-        if (v != VK_SUCCESS) { error = vkError("vkCreateSemaphore (acquire)", v); return false; }
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        v = vkCreateFence(device, &fenceInfo, nullptr, &inFlight);
-        if (v != VK_SUCCESS) { error = vkError("vkCreateFence", v); return false; }
+        for (size_t i = 0; i < submissions.size(); ++i) {
+            auto& slot = submissions[i];
+            slot.command = commands[i];
+            v = vkCreateSemaphore(device, &semInfo, nullptr, &slot.available);
+            if (v != VK_SUCCESS) { error = vkError("vkCreateSemaphore (acquire)", v); return false; }
+            v = vkCreateFence(device, &fenceInfo, nullptr, &slot.inFlight);
+            if (v != VK_SUCCESS) { error = vkError("vkCreateFence", v); return false; }
+        }
         return createSwapchain(error);
     }
 
@@ -162,8 +170,13 @@ public:
     bool hasDisplayTiming() const { return getTimings != nullptr; }
     void forgetTimings() { pending.clear(); }
     bool deviceLost() const { return lastResult == VK_ERROR_DEVICE_LOST; }
-    std::unique_ptr<FrameGeneration> createFG() {
-        return std::make_unique<FrameGeneration>(gpu, device, graphicsQueue, queueFamily);
+    uint64_t refreshCycleNs() const {
+        VkRefreshCycleDurationGOOGLE cycle{};
+        return getRefreshCycle && getRefreshCycle(device, swapchain, &cycle) == VK_SUCCESS
+            ? cycle.refreshDuration : 0;
+    }
+    std::unique_ptr<FrameGeneration> createFG(VkExtent2D dimensions) {
+        return std::make_unique<FrameGeneration>(gpu, device, graphicsQueue, queueFamily, dimensions);
     }
 
     std::vector<PresentedFrame> collectTimings() {
@@ -193,17 +206,20 @@ public:
 
     bool draw(uint64_t index, std::string& error, const SceneFrame* scene = nullptr,
               FrameGeneration* synthesis = nullptr, VkImage source = VK_NULL_HANDLE,
-              bool generated = false, uint64_t sampleNs = 0) {
+              bool generated = false, uint64_t sampleNs = 0, uint64_t desiredPresentNs = 0) {
         sent = false;
         if (source && !blit) {
             if (generated) return true;
             source = VK_NULL_HANDLE;
         }
-        VkResult v = vkWaitForFences(device, 1, &inFlight, VK_TRUE, 250'000'000);
+        auto& slot = submissions[submissionIndex];
+        const auto commandBuffer = slot.command;
+        VkResult v = vkWaitForFences(device, 1, &slot.inFlight, VK_TRUE, generated ? 0 : 25'000'000);
         if (v == VK_TIMEOUT) return true;
         if (v != VK_SUCCESS) return drawError("vkWaitForFences", v, error);
         uint32_t imageIndex = 0;
-        v = vkAcquireNextImageKHR(device, swapchain, 50'000'000, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        v = vkAcquireNextImageKHR(device, swapchain, generated ? 0 : 25'000'000,
+            slot.available, VK_NULL_HANDLE, &imageIndex);
         if (v == VK_TIMEOUT || v == VK_NOT_READY) return true;
         if (v == VK_ERROR_OUT_OF_DATE_KHR) return recreate(error);
         if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) return drawError("vkAcquireNextImageKHR", v, error);
@@ -227,7 +243,7 @@ public:
         rp.clearValueCount = 1;
         rp.pClearValues = &background;
         if (source) {
-            recordBlit(images[imageIndex], *synthesis, source);
+            recordBlit(commandBuffer, images[imageIndex], *synthesis, source);
         } else if (ahbMode) {
             AhbOffscreen& current = offscreenFrames[index % offscreenFrames.size()];
             if (!current.ready()) { error = "Quadro AHB não inicializado."; return false; }
@@ -259,27 +275,28 @@ public:
         v = vkEndCommandBuffer(commandBuffer);
         if (v != VK_SUCCESS) { error = vkError("vkEndCommandBuffer", v); return false; }
 
-        v = vkResetFences(device, 1, &inFlight);
+        v = vkResetFences(device, 1, &slot.inFlight);
         if (v != VK_SUCCESS) { error = vkError("vkResetFences", v); return false; }
         VkPipelineStageFlags stage = (ahbMode || source) ? VK_PIPELINE_STAGE_TRANSFER_BIT :
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submit.waitSemaphoreCount = 1;
-        submit.pWaitSemaphores = &imageAvailable;
+        submit.pWaitSemaphores = &slot.available;
         submit.pWaitDstStageMask = &stage;
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &commandBuffer;
         submit.signalSemaphoreCount = 1;
         submit.pSignalSemaphores = &presentSemaphores[imageIndex];
-        v = vkQueueSubmit(graphicsQueue, 1, &submit, inFlight);
+        v = vkQueueSubmit(graphicsQueue, 1, &submit, slot.inFlight);
         if (v != VK_SUCCESS) return drawError("vkQueueSubmit", v, error);
+        submissionIndex = (submissionIndex + 1) % submissions.size();
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         present.waitSemaphoreCount = 1;
         present.pWaitSemaphores = &presentSemaphores[imageIndex];
         present.swapchainCount = 1;
         present.pSwapchains = &swapchain;
         present.pImageIndices = &imageIndex;
-        VkPresentTimeGOOGLE stamp{nextPresentId++, 0};
+        VkPresentTimeGOOGLE stamp{nextPresentId++, desiredPresentNs};
         VkPresentTimesInfoGOOGLE timestamps{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
         if (getTimings) {
             timestamps.swapchainCount = 1;
@@ -306,7 +323,8 @@ private:
         return false;
     }
 
-    void recordBlit(VkImage destination, const FrameGeneration& synthesis, VkImage source) {
+    void recordBlit(VkCommandBuffer commandBuffer, VkImage destination,
+                    const FrameGeneration& synthesis, VkImage source) {
         VkImageMemoryBarrier target{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         target.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         target.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -329,7 +347,8 @@ private:
         synthesis.acquireRead(commandBuffer, source);
         VkImageBlit region{};
         region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.srcOffsets[1] = {int32_t(FrameGeneration::extent.width), int32_t(FrameGeneration::extent.height), 1};
+        const auto dimensions = synthesis.dimensions();
+        region.srcOffsets[1] = {int32_t(dimensions.width), int32_t(dimensions.height), 1};
         region.dstSubresource = region.srcSubresource;
         region.dstOffsets[0] = {area.offset.x, area.offset.y, 0};
         region.dstOffsets[1] = {area.offset.x + int32_t(area.extent.width),
@@ -513,8 +532,10 @@ private:
         if (device) {
             vkDeviceWaitIdle(device);
             destroySwapchain();
-            if (inFlight) vkDestroyFence(device, inFlight, nullptr);
-            if (imageAvailable) vkDestroySemaphore(device, imageAvailable, nullptr);
+            for (auto& slot : submissions) {
+                if (slot.inFlight) vkDestroyFence(device, slot.inFlight, nullptr);
+                if (slot.available) vkDestroySemaphore(device, slot.available, nullptr);
+            }
             if (commandPool) vkDestroyCommandPool(device, commandPool, nullptr);
             vkDestroyDevice(device, nullptr);
         }
@@ -529,6 +550,7 @@ private:
     bool displayTiming = false;
     VkResult lastResult = VK_SUCCESS;
     PFN_vkGetPastPresentationTimingGOOGLE getTimings = nullptr;
+    PFN_vkGetRefreshCycleDurationGOOGLE getRefreshCycle = nullptr;
     uint32_t nextPresentId = 1;
     std::deque<PresentedFrame> pending;
     std::array<AhbOffscreen, 2> offscreenFrames;
@@ -545,10 +567,14 @@ private:
     std::vector<VkImageView> imageViews;
     std::vector<VkFramebuffer> framebuffers;
     VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    VkSemaphore imageAvailable = VK_NULL_HANDLE;
+    struct Submission {
+        VkCommandBuffer command = VK_NULL_HANDLE;
+        VkSemaphore available = VK_NULL_HANDLE;
+        VkFence inFlight = VK_NULL_HANDLE;
+    };
+    std::array<Submission, 2> submissions;
+    size_t submissionIndex = 0;
     std::vector<VkSemaphore> presentSemaphores;
-    VkFence inFlight = VK_NULL_HANDLE;
 };
 
 struct Metrics {
@@ -575,7 +601,10 @@ struct Metrics {
         std::ostringstream out;
         out << std::fixed << std::setprecision(1);
         out << originals / seconds << " FPS originais · ";
-        if (timing && shown) out << shown / seconds << " FPS na tela (" << shownGenerated << " FG)";
+        if (timing && shown) {
+            out << shown / seconds << " FPS na tela (" << shownGenerated << " FG)";
+            out << "\n" << (shown - shownGenerated) / seconds << " FPS originais na tela";
+        }
         else out << sent / seconds << " envios/s (" << sentGenerated << " FG)";
         if (displaySamples) out << "\n" << displayMs / displaySamples << " ms por quadro na tela";
         if (waitSamples) out << "\nLSFG " << batchMs / waitSamples << " ms por lote (inclui espera)";
@@ -626,6 +655,7 @@ struct Runner {
     JavaVM* vm;
     jobject game;
     int targetFps;
+    std::atomic<int> fallbackRefreshMilliHz{0};
     bool ahbMode;
     bool live;
     std::string dll;
@@ -679,55 +709,93 @@ struct Runner {
         }
         std::unique_ptr<FrameGeneration> fg;
         bool failed = !recovery.empty();
+        bool protectedMode = false;
         std::string detail = recovery;
         std::string evidence;
         uint32_t age = 0;
         uint32_t validationAttempts = 0;
         bool verified = false;
+        constexpr std::array<VkExtent2D, 3> renderSizes{{{640, 360}, {480, 270}, {384, 216}}};
+        const size_t initialProfile = targetFps <= 30 ? 0 : targetFps <= 45 ? 1 : 2;
+        size_t profile = initialProfile;
+        pacing::GenerationBudget budget;
         const auto period = Ns(1'000'000'000 / targetFps);
-        auto next = Clock::now();
-        auto measure = next;
+        auto measure = Clock::now();
+        auto refreshSample = Clock::time_point{};
+        pacing::Time refreshPeriod = 0;
         uint64_t sequence = 0;
+        unsigned slowWindows = 0;
         Metrics metrics;
-        auto render = [&](const SceneFrame* frame, VkImage image, bool generated, uint64_t sampleNs) {
+        auto render = [&](const SceneFrame* frame, VkImage image, bool generated,
+                          uint64_t sampleNs, uint64_t desired = 0) {
             std::lock_guard<std::mutex> lock(surfaceMutex);
             if (!running) return true;
-            if (!renderer.draw(sequence, error, frame, fg.get(), image, generated, sampleNs)) return false;
+            if (!renderer.draw(sequence, error, frame, fg.get(), image, generated, sampleNs, desired)) return false;
             if (renderer.sent) {
                 ++metrics.sent;
                 metrics.sentGenerated += generated;
-            } else if (generated) ++metrics.omitted;
-            metrics.record(renderer.collectTimings());
+            }
             return true;
         };
-        auto disable = [&](std::string why) {
-            failed = true;
-            detail = std::move(why);
-            // A submitted swapchain copy may still reference the shared images.
-            // FrameGeneration owns the same queue, which is drained at teardown.
+        auto resetContext = [&] {
+            // A submitted swapchain copy may still reference an output AHB.
+            // FrameGeneration drains the producing queue before releasing it.
             fg.reset();
             verified = false;
+            age = validationAttempts = 0;
+            slowWindows = 0;
+            budget = {};
+            renderer.forgetTimings();
+        };
+        auto disable = [&](std::string why) {
+            resetContext();
+            failed = true;
+            detail = std::move(why);
             const std::string header = detail.substr(0, detail.find('\n'));
             setStatus("FG indisponível\n" + header, detail);
             __android_log_print(ANDROID_LOG_WARN, "FrameRoomFG", "%s", detail.c_str());
         };
+        auto reduceLoad = [&] {
+            resetContext();
+            if (profile + 1 < renderSizes.size()) {
+                ++profile;
+                detail = "Reduzindo a resolução da interpolação para preservar os originais.";
+                setStatus("Ajustando desempenho do FG…", detail);
+            } else {
+                protectedMode = true;
+                detail += "\nA interpolação perdeu o orçamento da GPU ou da apresentação repetidamente.";
+                setStatus("Proteção de FPS · Vulkan direto", detail);
+            }
+        };
+        auto sleepToMonotonic = [&](pacing::Time when) {
+            const auto remaining = when - static_cast<pacing::Time>(monotonicNs());
+            if (remaining > 0) sleepUntil(Clock::now() + Ns(remaining));
+        };
         while (running) {
             const bool requested = live && fgRequested.load();
-            if (!requested && (fg || failed)) {
-                fg.reset();
-                failed = verified = false;
-                renderer.forgetTimings();
-                age = validationAttempts = 0;
+            if (!requested && (fg || failed || protectedMode || profile != initialProfile)) {
+                resetContext();
+                failed = protectedMode = false;
+                profile = initialProfile;
                 detail.clear();
                 evidence.clear();
                 if (recovery.empty()) setStatus("Frame Generation desligado", {});
             }
-            if (requested && !fg && !failed) {
+            if (Clock::now() >= refreshSample) {
+                refreshPeriod = renderer.refreshCycleNs();
+                const int fallback = fallbackRefreshMilliHz.load();
+                if (refreshPeriod <= 0 && fallback > 0) refreshPeriod = 1'000'000'000'000LL / fallback;
+                refreshSample = Clock::now() + std::chrono::milliseconds(500);
+            }
+            const bool refreshFits = pacing::enoughRefresh(period.count(), refreshPeriod);
+            if (!refreshFits && fg) resetContext();
+            if (requested && refreshFits && !fg && !failed && !protectedMode) {
                 setStatus("Inicializando LSFG 2×…", {});
                 if (renderer.supportsFG()) {
-                    fg = renderer.createFG();
+                    fg = renderer.createFG(renderSizes.at(profile));
                     if (fg->start(dll, error)) {
                         detail = fg->backend();
+                        evidence.clear();
                         setStatus("LSFG iniciado. Verificando quadros…", detail);
                     } else {
                         const bool lost = fg->deviceLost();
@@ -735,20 +803,23 @@ struct Runner {
                         if (lost) return true;
                     }
                 } else disable("A GPU ou a superfície não oferece AHB e blit Vulkan para este modo.");
-                // Setup can compile shaders; exclude it from frame pacing and FPS.
-                next = measure = Clock::now();
+                // Exclude context creation and shader compilation from the measured cadence.
+                measure = Clock::now();
+                auto totalOmitted = metrics.omitted;
                 metrics = {};
-                renderer.forgetTimings();
+                metrics.omitted = totalOmitted;
             }
             if (!running) break;
+            const auto start = Clock::now();
             SceneFrame frame;
-            const uint64_t sampleNs = monotonicNs();
+            const auto sampleNs = static_cast<pacing::Time>(monotonicNs());
             if (live && !source.sample(sequence, sampleNs, frame)) {
                 setStatus("O jogo não entregou um quadro válido", "O protocolo da cena cooperativa falhou.");
                 break;
             }
             ++metrics.originals;
-            VkImage original = VK_NULL_HANDLE;
+            pacing::PairTimes pair;
+            bool reduceAfterOriginal = false;
             if (fg) {
                 const bool warmup = age < 3;
                 const uint32_t current = age++ % 2;
@@ -757,63 +828,71 @@ struct Runner {
                     const bool lost = fg->deviceLost();
                     disable(error + "\n" + detail);
                     if (lost) return true;
-                } else {
-                    original = fg->original(current);
-                    if (!warmup) {
-                        metrics.batchMs += elapsed;
-                        ++metrics.waitSamples;
-                        if (!verified) {
-                            if (!fg->verify(current, verified, evidence)) {
-                                const bool lost = fg->deviceLost();
-                                disable(evidence + "\n" + detail);
-                                if (lost) return true;
-                                original = VK_NULL_HANDLE;
-                            } else if (!verified && ++validationAttempts >= 12) {
-                                disable("A imagem LSFG não passou na verificação de pixels.\n" + evidence + "\n" + detail);
-                                original = VK_NULL_HANDLE;
-                            }
+                } else if (!warmup) {
+                    metrics.batchMs += elapsed;
+                    ++metrics.waitSamples;
+                    if (!verified) {
+                        if (!fg->verify(current, verified, evidence)) {
+                            const bool lost = fg->deviceLost();
+                            disable(evidence + "\n" + detail);
+                            if (lost) return true;
+                        } else if (!verified && ++validationAttempts >= 12) {
+                            disable("A imagem LSFG não passou na verificação de pixels.\n" + evidence + "\n" + detail);
                         }
-                        if (verified && running && fgRequested) {
-                            const auto now = Clock::now();
-                            // Prefer an original frame if this batch has already consumed
-                            // the next original's slot. No repeat frame is submitted.
-                            if (now <= next + period) {
-                                if (!render(&frame, fg->generated(), true, sampleNs)) {
-                                    setStatus("Falha ao apresentar FG", error + "\n" + detail);
-                                    return renderer.deviceLost();
-                                }
-                                if (renderer.sent)
-                                    sleepUntil((std::min)(next + period, Clock::now() + period / 2));
-                            } else ++metrics.omitted;
-                        } else ++metrics.omitted;
+                    }
+                    if (verified && running && fgRequested.load()) {
+                        pair = pacing::pairTimes(sampleNs, monotonicNs(), period.count());
+                        if (pair) {
+                            if (!renderer.hasDisplayTiming()) sleepToMonotonic(pair.generated);
+                            if (!render(&frame, fg->generated(), true, sampleNs, pair.generated)) {
+                                setStatus("Falha ao apresentar FG", error + "\n" + detail);
+                                return renderer.deviceLost();
+                            }
+                            if (!renderer.sent) pair = {};
+                        }
+                        if (!pair) ++metrics.omitted;
+                        reduceAfterOriginal = budget.shouldReduce(!pair);
                     }
                 }
             }
-            if (!render(live ? &frame : nullptr, original, false, sampleNs)) {
+            // Originals use the full swapchain resolution in both modes. When
+            // timed WSI is available the producer queues the pair back-to-back.
+            if (pair && !renderer.hasDisplayTiming()) sleepToMonotonic(pair.original - pacing::ms);
+            if (!render(live ? &frame : nullptr, VK_NULL_HANDLE, false, sampleNs, pair.original)) {
                 setStatus("Erro na apresentação Vulkan", error + "\n" + detail);
                 return renderer.deviceLost();
             }
             ++sequence;
+            metrics.record(renderer.collectTimings());
             auto now = Clock::now();
             const double seconds = std::chrono::duration<double>(now - measure).count();
             if (seconds >= 1.0) {
                 std::string state;
                 if (failed) state = "FG indisponível · Vulkan direto";
-                else if (!fg) state = live ? "FG desligado" : (ahbMode ? "Vulkan AHB duplo" : "Vulkan direto");
+                else if (protectedMode) state = "Proteção de FPS · Vulkan direto";
+                else if (requested && !refreshFits) {
+                    state = "FG em espera · tela a " + std::to_string((1'000'000'000 + refreshPeriod / 2) / refreshPeriod) + " Hz";
+                } else if (!fg) state = live ? "FG desligado" : (ahbMode ? "Vulkan AHB duplo" : "Vulkan direto");
                 else if (metrics.shownGenerated) state = "FG 2× confirmado pela tela";
                 else if (metrics.sentGenerated) state = "FG 2× enviado à tela";
                 else if (verified) state = "FG sem apresentação neste intervalo";
                 else state = "LSFG 2× · verificando imagem";
+                const double originalRate = (metrics.sent - metrics.sentGenerated) / seconds;
+                if (verified && originalRate < targetFps * .85) ++slowWindows;
+                else slowWindows = 0;
+                reduceAfterOriginal |= slowWindows >= 2;
                 const auto rates = metrics.report(seconds, renderer.hasDisplayTiming());
-                setStatus(state + "\n" + rates, evidence + (evidence.empty() ? "" : "\n") + detail +
+                std::string refresh = refreshPeriod ? "\nCiclo de tela: " + std::to_string(refreshPeriod / 1000) +
+                    " µs · meta de saída: " + std::to_string(targetFps * 2) + " FPS" : "";
+                setStatus(state + "\n" + rates, evidence + (evidence.empty() ? "" : "\n") + detail + refresh +
                     "\nLatência da cena: da amostra do jogo ao horário de exibição informado pelo Vulkan. " +
                     "Sem VK_GOOGLE_display_timing, o contador usa envios à swapchain.");
                 measure = now;
             }
-            next += period;
-            // Skip expired deadlines rather than submitting several originals at once.
-            if (next < now) next = now + period;
-            sleepUntil(next);
+            if (reduceAfterOriginal && fg) reduceLoad();
+            sleepUntil(Clock::time_point(Ns(pacing::nextOriginal(
+                std::chrono::duration_cast<Ns>(start.time_since_epoch()).count(),
+                std::chrono::duration_cast<Ns>(now.time_since_epoch()).count(), period.count()))));
         }
         return false;
     }
@@ -884,6 +963,12 @@ extern "C" JNIEXPORT void JNICALL
 Java_dev_frameroom_VulkanPlayerView_nativeSetFrameGeneration(JNIEnv*, jclass, jlong id, jboolean enabled) {
     std::lock_guard<std::mutex> lock(globalMutex);
     if (runner && id == session) runner->fgRequested = enabled;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_frameroom_VulkanPlayerView_nativeSetRefreshRate(JNIEnv*, jclass, jlong id, jint milliHz) {
+    std::lock_guard<std::mutex> lock(globalMutex);
+    if (runner && id == session) runner->fallbackRefreshMilliHz = milliHz;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
