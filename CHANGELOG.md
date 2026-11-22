@@ -1,3 +1,9 @@
+# R0.6 — lote GPU LSFG 2× (sem apresentação)
+- FrameGen batch headless 640×360, duas entradas Vulkan AHB e uma saída com flags do backend.
+- `create_context`, `present` com um quadro gerado e espera de sincronização.
+- Botão de teste com diagnóstico; resultados na Adreno 710 ainda não comprovados.
+- Não é espaço paralelo e ainda não exibe frames interpolados.
+
 # R0.5 — Inicialização Bloodframe LSFG em APK (diagnóstico)
 - Bibliotecas nativas Bloodframe compiladas pelo CI a partir de versão fixada.
 - JNI usa `bb_lsfg_init`, relata shaders e recursos AHB ou mensagem real de erro.

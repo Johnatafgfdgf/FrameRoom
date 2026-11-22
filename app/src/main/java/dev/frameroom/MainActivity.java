@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         setContentView(scroll);
         heading("FrameRoom", 29, Color.WHITE);
-        info("R0.5 • Base Android e demonstração Vulkan (sem root)");
+        info("R0.6 • Base Android e demonstração Vulkan (sem root)");
         section("Aplicativos selecionados");
         info("Nesta versão são atalhos para apps externos. Ainda NÃO são clones nem executados dentro do FrameRoom.");
         button(content, "+ Adicionar aplicativo", () -> startActivity(new Intent(this, AppPickerActivity.class)));
@@ -86,6 +86,19 @@ public class MainActivity extends Activity {
             });
         });
 
+        TextView batchStatus = info("Lote 2×: ainda não executado.");
+        button(content, "Teste experimental: gerar 1 quadro LSFG (sem exibição)", () -> {
+            java.io.File file = DllStore.location(this);
+            if (!file.isFile()) { batchStatus.setText("Importe sua Lossless.dll primeiro."); return; }
+            batchStatus.setText("Gerando quadro sintético pela GPU...");
+            executor.execute(() -> {
+                String answer;
+                try { answer = NativeProbe.frameGenBatchReport(file.getAbsolutePath()); }
+                catch (Throwable e) { answer = "Falha no teste 2×: " + e; }
+                final String report = answer;
+                if (!destroyed) runOnUiThread(() -> { if (!destroyed) batchStatus.setText(report); });
+            });
+        });
         section("Vulkan + AHardwareBuffer — Fase 2");
         button(content, "Testar Vulkan direto / AHB duplo", () ->
                 startActivity(new Intent(this, VulkanDemoActivity.class)));

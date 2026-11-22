@@ -1,26 +1,26 @@
-# FrameRoom R0.5 — diagnóstico real Bloodframe / LSFG
+# FrameRoom R0.6 — lote experimental LSFG 2× em Vulkan/AHB
 
-Esta versão continua a R0.4 e **não é o FrameRoom final**. Ainda não existe espaço paralelo funcional nem apresentação de quadros gerados para jogos. Os apps escolhidos continuam abrindo fora do FrameRoom.
+**Estado:** a R0.5 compilou com sucesso no GitHub Actions; a R0.6 adiciona um teste que passa de inicialização a **chamar o motor real de Frame Generation** (`bb_lsfg_create_context`, `bb_lsfg_present`, `bb_lsfg_wait`) com dois quadros sintéticos criados pela GPU Vulkan. **Não exibe o quadro interpolado e não executa jogos num espaço paralelo.** Nenhuma alegação de FPS extra em aplicativos.
 
-## Implementado na R0.5
-- GitHub Actions compila a biblioteca **Bloodframe 2.0** do código-fonte MIT em commit fixado `f4ac713aef58d9403a136e179b3b0d163d85eb66`.
-- A DLL original do usuário permanece em armazenamento privado. O APK não contém DLL nem shaders proprietários.
-- O botão **Diagnosticar Bloodframe + DLL + Vulkan** carrega `libbloodframe.so`, cria instância Vulkan, consulta UUID de dispositivo e driver, chama `bb_lsfg_init`, relata shader e configuração AHB ou erro do driver, e libera os recursos.
-- A demonstração Vulkan / AHB duplo da R0.4 foi mantida.
+## O que foi criado
 
-## Não implementado
-- `bb_lsfg_create_context`, `bb_lsfg_present`, apresentação de quadros interpolados ou métricas de FPS gerados. O diagnóstico é inicialização, **não Frame Generation**.
-- Execução de apps Android terceiros dentro do FrameRoom. Não existe sandbox ou clonagem real sem root nesta versão.
+- `framegen_batch.cpp`: renderizador Vulkan headless (640×360), duas imagens AHardwareBuffer independentes, conteúdo sintético GPU, output AHardwareBuffer, chamada Bloodframe real e espera pela conclusão do lote.
+- JNI `NativeProbe.frameGenBatchReport` e botão na interface, com diagnóstico distinto para inicialização, importação Vulkan, buffer, contexto e processamento.
+- Preserva o demo Vulkan, a seleção de atalhos e a importação privada da `Lossless.dll`.
+- GitHub Actions continua construindo `libbloodframe.so` a partir de fonte MIT com hash fixo. A DLL não é distribuída.
 
-## Teste no POCO X6 5G
-1. Compile pelo workflow GitHub Actions ou baixe o APK debug quando houver run bem-sucedido.
-2. Importe sua própria `Lossless.dll`.
-3. Toque em **Diagnosticar Bloodframe + DLL + Vulkan**, copie o resultado da tela.
-4. Se houver falha no build, compartilhe o artefato `FrameRoom-r0.5-build-log`.
+## Testes e limites
 
-Este relatório distingue compatibilidade de shader/GPU de execução de um jogo; o teste em Adreno 710 continua necessário.
+1. Compilar APK R0.6 na aba Actions e instalar no POCO X6 5G.
+2. Importar uma DLL legítima do Lossless Scaling.
+3. Tocar em **Diagnosticar Bloodframe + DLL + Vulkan** para checar shaders/driver.
+4. Tocar em **Teste experimental: gerar 1 quadro LSFG (sem exibição)**. O retorno comprova somente que o pipeline retornou sucesso ao processar o lote. **Não demonstra imagem visível correta, ausência de artefatos ou desempenho**.
+5. Não existe ainda reaproveitamento da saída para apresentação na tela, pacing 2× ou suporte a aplicativos de terceiros sem root.
 
-Próximo marco: criar AHBs com os flags exatos retornados por `bb_lsfg_init`, ligar os buffers à API `create_context/present`, sincronizar saída e validar um quadro interpolado na cena própria. Só depois tentar ambientes Android compatíveis.
+### Sobre o espaço paralelo
 
-## Licenças
-FrameRoom: MIT. A biblioteca Bloodframe e seu cabeçalho vêm do projeto [ducvd89/bloodframe](https://github.com/ducvd89/bloodframe), MIT, com crédito em `app/src/main/cpp/third_party/BLOODFRAME-NOTICE.md`.
+O Android não permite injeção geral em aplicativos não depuráveis sem autorização; os atalhos atuais não são uma VM. A próxima fase deve usar um aplicativo renderizador cooperante ou uma sandbox realmente comprovada, não prometer universalidade.
+
+### Licenças
+
+Bloodframe 2.0 e dependências seguem seus termos (MIT, com notices upstream). Os shaders do LSFG não estão no APK; o usuário importa a própria Lossless.dll.

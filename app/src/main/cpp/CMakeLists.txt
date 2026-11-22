@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(frameroom_probe LANGUAGES CXX)
-add_library(lsfgprobe SHARED probe.cpp vulkan_demo.cpp ahb_offscreen.cpp bloodframe_probe.cpp)
+add_library(lsfgprobe SHARED probe.cpp vulkan_demo.cpp ahb_offscreen.cpp bloodframe_probe.cpp framegen_batch.cpp)
 target_compile_features(lsfgprobe PRIVATE cxx_std_17)
 target_compile_definitions(lsfgprobe PRIVATE VK_USE_PLATFORM_ANDROID_KHR=1)
 target_link_libraries(lsfgprobe PRIVATE vulkan android log dl)
