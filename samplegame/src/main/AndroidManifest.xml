@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:label="FrameRoom Test Game" android:allowBackup="false" android:theme="@android:style/Theme.Material.NoActionBar">
+    <!-- Only an APK we build with the same signing certificate is accepted by the FrameRoom R0.8 host. -->
+    <meta-data android:name="dev.frameroom.GAME_ENTRY" android:value="dev.frameroom.samplegame.GameEntry" />
+    <activity android:name=".SampleActivity" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

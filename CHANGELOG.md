@@ -1,3 +1,9 @@
+# R0.8 — primeiro APK cooperativo rodando dentro do FrameRoom
+- App de demonstração Android próprio compilado como segundo APK e assinado no mesmo build.
+- Um processo `:virtualgame` separado carrega bytecode do APK copiado por `DexClassLoader` após verificar certificado e SHA-256.
+- UI adiciona botão para executar somente o demo; outros apps continuam limitados a snapshots/atalhos.
+- O demo usa Canvas, sem Vulkan/LSFG. Não corresponde à clonagem de jogos comerciais.
+
 # R0.7 — preparação de pacote e processo gráfico
 - Snapshot privado do APK base e splits instalados, com SHA-256 e validação ZIP.
 - Indicadores de versão/motor estimado/ABI; aviso explícito de cópia não executável.

@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
         scroll.addView(content);
         setContentView(scroll);
         heading("FrameRoom", 29, Color.WHITE);
-        info("R0.7 • Preparação de APKs para futuro espaço paralelo");
+        info("R0.8 • Execução de APK cooperativo (teste sem root)");
         section("Aplicativos selecionados");
         info("Escolha um jogo. O FrameRoom consegue preparar uma cópia privada do APK base e dos splits, mas ainda não executa o clone. O original permanece intocado.");
         button(content, "+ Adicionar aplicativo", () -> startActivity(new Intent(this, AppPickerActivity.class)));
@@ -99,6 +99,8 @@ public class MainActivity extends Activity {
                 if (!destroyed) runOnUiThread(() -> { if (!destroyed) batchStatus.setText(report); });
             });
         });
+        section("Execução de APK cooperativo — teste R0.8");
+        info("Instale o APK FrameRoom Test Game criado na mesma compilação. Adicione-o à lista, prepare uma cópia privada e use o botão EXECUTAR CÓPIA. Apenas este demo assinado funciona; jogos comerciais continuam sem virtualização.");
         section("Processo gráfico separado — prova de conceito");
         info("O renderizador Vulkan agora usa um processo :virtualgfx, separado da interface. Ele só renderiza nossa cena de teste: não executa jogos clonados.");
         section("Vulkan + AHardwareBuffer — Fase 2");
@@ -146,6 +148,13 @@ public class MainActivity extends Activity {
             TextView sub = text(pkg + "\nExecução em espaço paralelo: AINDA NÃO DISPONÍVEL." +
                     (current == null ? "\nAPKs ainda não preparados." : "\n" + current.report()));
             group.addView(sub);
+            if ("dev.frameroom.samplegame".equals(pkg) && current != null) {
+                button(group, "Executar cópia do JOGO DE TESTE dentro do FrameRoom", () -> {
+                    Intent hosted = new Intent(this, HostedGameActivity.class);
+                    hosted.putExtra(HostedGameActivity.EXTRA_PACKAGE, pkg);
+                    startActivity(hosted);
+                });
+            }
             button(group, "Abrir fora do FrameRoom (sem FG)", () -> {
                 try {
                     Intent launch = pm.getLaunchIntentForPackage(pkg);
@@ -162,7 +171,13 @@ public class MainActivity extends Activity {
                     try { message = GamePackageSnapshot.prepare(getApplicationContext(), pkg).report(); }
                     catch (Exception error) { message = "Falha ao copiar APK: " + error.getMessage(); }
                     final String report = message;
-                    if (!destroyed) runOnUiThread(() -> { if (!destroyed) sub.setText(pkg + "\n" + report); });
+                    if (!destroyed) runOnUiThread(() -> {
+                        if (!destroyed) {
+                            sub.setText(pkg + "\n" + report);
+                            if (report.contains("NÃO é um clone executável") ||
+                                report.contains("NÃO é um clone executável")) refreshApps();
+                        }
+                    });
                 });
             });
             if (current != null) button(group, "Apagar cópias locais deste jogo", () ->
