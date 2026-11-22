@@ -6,6 +6,8 @@ Use **Jogos → Espaço paralelo → Criar espaço** e conclua a configuração 
 
 O FrameRoom é o controlador do perfil que cria com `ACTION_PROVISION_MANAGED_PROFILE`. `SpaceProfile` configura dois filtros de intenção para encaminhar as telas de instalação e da biblioteca. A tela de destino só funciona quando o FrameRoom é dono do perfil que a recebeu.
 
+Durante a configuração, o FrameRoom libera o uso do instalador nas políticas do perfil que administra. O Android ainda controla a autorização por aplicativo de origem, a confirmação de instalação e as políticas aplicadas por outros administradores.
+
 O FrameRoom encaminha o identificador do pacote escolhido. A cópia do FrameRoom no perfil abre o instalador do sistema com `ACTION_INSTALL_PACKAGE` e uma URI `package:`. Esse fluxo do Android disponibiliza o pacote existente com APK base, assinatura e splits, sem reempacotar os arquivos. O Android dá à cópia dados, contas e permissões daquele usuário e mantém a versão do código compartilhada quando o mesmo pacote existe em dois perfis. Apps que disponibilizam recursos por download ainda precisam obtê-los no novo perfil. [Perfis de trabalho](https://developer.android.com/work/managed-profiles) · [Intent do instalador](https://developer.android.com/reference/android/content/Intent#ACTION_INSTALL_PACKAGE)
 
 ## Acesso aos quadros

@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.UserManager;
+import android.util.Log;
 
 final class SpaceProfile {
     static final String PACKAGE = "clonePackage";
@@ -49,6 +50,15 @@ final class SpaceProfile {
             policy.setProfileName(component, "FrameRoom");
             policy.setProfileEnabled(component);
             settings.edit().putBoolean("configured", true).apply();
+        }
+        if (!settings.getBoolean("installerPolicyConfigured", false)) {
+            try {
+                // Set the policy of this app's own work profile. The system still handles per-source consent.
+                policy.clearUserRestriction(component, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
+                settings.edit().putBoolean("installerPolicyConfigured", true).apply();
+            } catch (SecurityException error) {
+                Log.w("FrameRoomSpace", "O Android controla a política de instalação deste perfil", error);
+            }
         }
         return true;
     }
